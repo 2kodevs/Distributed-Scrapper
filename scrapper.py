@@ -27,6 +27,21 @@ def slave(tasks, uuid):
         log.info(f"Child:{os.getpid()} of Scrapper:{self.uuid} sending downloaded content of {url} to {clientAddr}")
         socket.send_json(("RESULT", response))
         
+def addClient(clientId, addr, port, clients:dict, clientQueue, uuid):
+    lockClients.acquire()
+    try:
+        if clients[clientId] != (addr, port):
+            clients[clientId] = (addr, port)
+            clientQueue.put((clientId, (addr, port))) 
+            log.debug(f"Client(id:{clientId}, address:{addr}) added to the queue of Scrapper:{uuid}")
+    except KeyError:
+        clients[clientId] = (addr, port)
+        clientQueue.put((clientId, (addr, port)))  
+        log.debug(f"Client(id:{id}, address:{addr}) added to the queue of Scrapper:{uuid}")
+    finally:
+        lockClients.release()
+
+
 def discoverClients(clients:dict, clientQueue, uuid):
     """
     Thread responsable for receive a new client to connect to.
@@ -39,18 +54,17 @@ def discoverClients(clients:dict, clientQueue, uuid):
     
     while True:
         [sub, contents] = socket.recv_multipart()
-        id, addr = pickle.loads(contents)
-        log.debug(f"Scrapper:{uuid} has received a new client(id:{id}, address:{addr})")
-        with lockClients:
-            if id in clients.keys():
-                clientQueue.put((id, addr))
-            clients[id] = addr
+        #addr: (address, port)
+        clientId, addr = pickle.loads(contents)
+        log.debug(f"Scrapper:{uuid} has received a new client(id:{clientId}, address:{addr[0]:addr[1]})")
+        addClient(clientId, addr[0], addr[1], clients, clientQueue, uuid)
 
 def connectToClients(socket, clientQueue, uuid):
-    for id, addr in iter(clientQueue.get, "STOP"):
+    for clientId, addr in iter(clientQueue.get, "STOP"):
         lockSocketPull.acquire()
-        socket.connect(f"tcp://{c}")
-        log.debug(f"Scrapper:{uuid} connected to client(id:{id}, address:{addr})")
+        #//TODO: Check if this is the proper port for connect socketPull
+        socket.connect(f"tcp://{addr[0]}:{addr[1]}")
+        log.debug(f"Scrapper:{uuid} connected to client(id:{clientId}, address:{addr[0]:addr[1]})")
         lockSocketPull.release()
 
 
@@ -84,7 +98,7 @@ class Scrapper:
 
         taskQueue = Queue()
         log.debug(f"Scrapper:{self.uuid} starting child process")
-        for s in range(slaves):
+        for _ in range(slaves):
             p = Process(target=slave, args=(taskQueue, self.uuid))
             p.start()
 
