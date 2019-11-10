@@ -25,7 +25,7 @@ def slave(tasks, uuid):
         log.debug(f"Child:{os.getpid()} of Scrapper:{self.uuid} connecting to {clientAddr}")
         socket.connect(f"tcp://{clientAddr}")
         log.info(f"Child:{os.getpid()} of Scrapper:{self.uuid} sending downloaded content of {url} to {clientAddr}")
-        socket.send_json(response)
+        socket.send_json(("RESULT", response))
         
 def discoverClients(clients:dict, clientQueue, uuid):
     """

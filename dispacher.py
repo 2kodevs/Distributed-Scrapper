@@ -25,6 +25,8 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     #//TODO: Check if 'i' is enough for this condition to be fulfilled
     while i < sizeUrls:
         res = socket.recv_json()
+        if res[0] != "RESULT":
+            continue
         url, html = res[0], res[1]
         log.debug(f"GET {url} OK")
         i += 1
