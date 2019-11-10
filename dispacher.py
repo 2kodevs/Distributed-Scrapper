@@ -1,5 +1,5 @@
 import zmq, logging, json
-from src.util.params import format, datefmt
+from util.params import format, datefmt, urls
 from multiprocessing import Process, Lock
 
 #TODO: Find a way and a place to initialize more properly the logger for this module.
@@ -10,17 +10,17 @@ log.setLevel(logging.DEBUG)
 lockResults = Lock()
 lockPeers = Lock()
 
-def resultSubcriber(uuid, sizeUrls, peers, htmls):
+def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     """
     Get downloaded html from workers.
     """
     context = zmq.Context()
-    socket = context.socket(zmq.SUB)
+    socket = context.socket(zmq.REP)
+    socket.bind(f"tcp://{addr}")
     log.debug(f"Subscriber to results of Dispacher:{uuid} created")
 
-    connectSocketToPeers(socket, uuid, peers)
-    # socket.setsockopt(zmq.SUB, "RESULT")
-    socket.setsockopt_string(zmq.SUBSCRIBE, "RESULT")
+    #connectSocketToPeers(socket, uuid, peers)
+    #socket.setsockopt_string(zmq.SUBSCRIBE, "RESULT")
     i = 0
     #TODO: Check if 'i' is enough for this condition to be fulfilled
     while i < sizeUrls:
@@ -65,7 +65,7 @@ class Dispacher:
         socket = context.socket(zmq.PUSH)
         socket.bind(f"tcp://{self.address}:{self.port}")
         #params here are thread-safe???
-        rSubscriber = Process(target=resultSubcriber, args=(self.uuid, len(self.urls), self.peers, self.htmls))
+        rSubscriber = Process(target=resultSubscriber, args=(self.uuid, len(self.urls), self.peers, self.htmls, f"{self.address}:{int(self.port) + 1}"))
         rSubscriber.start()
 
         while len(self.htmls) != len(self.urls):
@@ -86,3 +86,7 @@ class Dispacher:
         log.debug(f"Dispacher:{self.uuid} disconnecting from system")
         #disconnect
         rSubscriber.join()
+
+if __name__ == "__main__":
+    d = Dispacher(urls, 1)
+    d.dispach()
