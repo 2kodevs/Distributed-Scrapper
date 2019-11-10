@@ -2,7 +2,7 @@ import zmq, logging, time, os, requests, pickle
 from util.params import client_addr, seeds, localhost
 from multiprocessing import Process, Lock, Queue
 from threading import Thread, Lock as tLock
-from util.params import format, datefmt
+from util.params import format, datefmt, login
 
 logging.basicConfig(format=format, datefmt=datefmt)
 log = logging.getLogger(name="Scrapper")
@@ -14,7 +14,7 @@ lockSocketPull = tLock()
 
 def slave(tasks, uuid):
     """
-    Represents a child process of Scrapper, responsable of downloading the urls.
+    Child Process of Scrapper, responsable of downloading the urls.
     """
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
@@ -48,7 +48,7 @@ def discoverClients(clients:dict, clientQueue, uuid):
     """
     context = zmq.Context()
     socket = context.socket(zmq.SUB)
-    #//TODO: Connect efficiently to the proper seed
+    #//HACK: Connect efficiently to the proper seed
     socket.connect(f"tcp://{seeds[0]}")
     socket.setsockopt(zmq.SUBSCRIBE, b"NEW_CLIENT")
     
@@ -72,12 +72,13 @@ class Scrapper:
     """
     Represents a scrapper, the worker node in the Scrapper network.
     """
-    def __init__(self, uuid, address=localhost, port=8301):
+    def __init__(self, uuid, address=localhost, port=8301, seed=False):
         self.uuid = uuid
         self.clients = dict()
         self.addr = address
         self.port = port
-        log.debug(f"Scrapper created with uuid {uuid}")
+        self.seed = seed
+        log.debug(f"Scrapper created with uuid {uuid} --- Is Seed:{seed}")
 
     def manage(self, slaves):
         """
