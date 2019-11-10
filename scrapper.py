@@ -33,7 +33,7 @@ def discoverClients(clients:dict, clientQueue, uuid):
     """
     context = zmq.Context()
     socket = context.socket(zmq.SUB)
-    #TODO: Connect efficiently to the proper seed
+    #//TODO: Connect efficiently to the proper seed
     socket.connect(f"tcp://{seeds[0]}")
     socket.setsockopt(zmq.SUBSCRIBE, b"NEW_CLIENT")
     
@@ -94,7 +94,7 @@ class Scrapper:
             log.debug(f"Pulled {task[1]} in worker:{self.uuid}")
             taskQueue.put(task)
 
-    #TODO: Create seed methods.
+    #//TODO: Create seed methods.
             
 if __name__ == "__main__":
     s = Scrapper(2)

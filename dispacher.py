@@ -2,7 +2,7 @@ import zmq, logging, json
 from util.params import format, datefmt, urls
 from multiprocessing import Process, Lock
 
-#TODO: Find a way and a place to initialize more properly the logger for this module.
+#//TODO: Find a way and a place to initialize more properly the logger for this module.
 logging.basicConfig(format=format, datefmt=datefmt)
 log = logging.getLogger(name="Dispacher")
 log.setLevel(logging.DEBUG)
@@ -22,7 +22,7 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     #connectSocketToPeers(socket, uuid, peers)
     #socket.setsockopt_string(zmq.SUBSCRIBE, "RESULT")
     i = 0
-    #TODO: Check if 'i' is enough for this condition to be fulfilled
+    #//TODO: Check if 'i' is enough for this condition to be fulfilled
     while i < sizeUrls:
         res = socket.recv_json()
         url, html = res[0], res[1]
@@ -31,7 +31,7 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
         lockResults.acquire()
         htmls.append((url, html))
         lockResults.release()
-        #TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
+        #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
         
 
 def connectSocketToPeers(socket, uuid, peers):
