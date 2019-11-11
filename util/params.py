@@ -8,9 +8,8 @@ urls = [
 format  = '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
 datefmt ='%Y-%m-%d %H:%M:%S'
 
-localhost = "localhost"
-client_addr = localhost + ":" + "8101"
-seeds = [localhost + ":" + "8102"]
+localhost = "127.0.0.1"
+seeds = [(localhost, 8101)]
 
 login = "DISTRIBUTED-SCRAPPER"
 
