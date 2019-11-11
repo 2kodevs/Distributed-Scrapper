@@ -13,6 +13,8 @@ lockResults = Lock()
 lockPeers = Lock()
 lockLogin = tLock()
 
+change = False
+
 def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     """
     Child Process that get downloaded html from workers.
@@ -21,6 +23,7 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     socket = context.socket(zmq.REP)
     socket.bind(f"tcp://{addr}")
     log.debug(f"Subscriber to results of Dispacher:{uuid} created")
+    global change
 
     #connectSocketToPeers(socket, uuid, peers)
     #socket.setsockopt_string(zmq.SUBSCRIBE, "RESULT")
@@ -36,7 +39,7 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
         i += 1
         with lockResults:
             htmls.append((url, html))
-        lockResults.release()
+            change = True
         #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
         
 
@@ -90,6 +93,7 @@ class Dispacher:
         context = zmq.Context()
         socket = context.socket(zmq.PUSH)
         socket.bind(f"tcp://{self.address}:{self.port}")
+        global change
         #params here are thread-safe???
         pRSubscriber = Process(target=resultSubscriber, args=(self.uuid, len(self.urls), self.peers, self.htmls, f"{self.address}:{self.port + 1}"))
         pRSubscriber.start()
@@ -104,14 +108,20 @@ class Dispacher:
                 #Check htmls vs urls and update pool
                 log.debug(f"Waiting for update pool of Dispacher:{self.uuid}")
                 with lockResults:
-                log.debug(f"Updating pool of Dispacher:{self.uuid}")
-                responsedURLs = {html for url, html in self.htmls}
-                self.pool = self.urls - responsedURLs
-                lockResults.release()
-
-            url = self.pool.pop()
-            log.debug(f"Pushing {url} from Dispacher:{self.uuid}")
-            socket.send_json(url)
+                #//HACK: For now the condition for the pool to be updated is that we get a result, but this is no correct because a worker can die without finish his task.
+                    if change:
+                        log.debug(f"Updating pool of Dispacher:{self.uuid}")
+                        responsedURLs = {html for url, html in self.htmls}
+                        self.pool = self.urls - responsedURLs
+                        change = False
+            try:
+                url = self.pool.pop()
+                log.debug(f"Pushing {url} from Dispacher:{self.uuid}")
+                socket.send_json((f"{self.address}:{self.port + 1}",url))
+            except IndexError:
+                if len(self.urls) == len(self.htmls):
+                    break
+                time.sleep(5)
 
         log.info(f"Dispacher:{self.uuid} has completed his URLs succefully")
         log.debug(f"Dispacher:{self.uuid} disconnecting from system")
