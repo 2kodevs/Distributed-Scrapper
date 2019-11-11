@@ -1,6 +1,7 @@
-import zmq, logging, json
-from util.params import format, datefmt, urls
+import zmq, logging, json, time
+from util.params import format, datefmt, urls, seeds, login
 from multiprocessing import Process, Lock
+from threading import Thread, Lock as tLock
 
 #//TODO: Find a way and a place to initialize more properly the logger for this module.
 logging.basicConfig(format=format, datefmt=datefmt)
@@ -9,6 +10,7 @@ log.setLevel(logging.DEBUG)
 
 lockResults = Lock()
 lockPeers = Lock()
+lockLogin = tLock()
 
 def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     """
@@ -43,12 +45,32 @@ def connectSocketToPeers(socket, uuid, peers):
     for p in peers:
         socket.connect(f"tcp://{p[0]}:{p[1]}")
     lockPeers.release()
+def loginToNetwork(addr, port, uuid):
+    """
+    Thread that enter the network when is requested.
+    """
+    while True:
+        with lockLogin:
+            context = zmq.Context()
+            socket = context.socket(zmq.REQ)
+            log.debug(f"Dispacher:{uuid} connecting to a seed")
+            #//HACK: Connect only to one seed per subnet. Or not?
+            for sa, sp in seeds:
+                socket.connect(f"tcp://{sa}:{sp + 1}")
+                log.debug(f"Dispacher:{uuid} connected to seed --- {sa}:{sp + 1}")
+
+            #message: (login, client_id , client_address, client_port)
+            #//HACK: This send message to all conections of the socket or to only one?
+            log.debug(f"Dispacher:{uuid} sending message of login to seeds")
+            socket.send_json((login, uuid, addr, port))
+        time.sleep(1)
+
 
 class Dispacher:
     """
     Represents a client to the services of the Scrapper.
     """
-    def __init__(self, urls, uuid, address="127.0.0.1", port="4142"):
+    def __init__(self, urls, uuid, address="127.0.0.1", port=4142):
         self.urls = set(urls)
         self.uuid = uuid
         self.address = address
@@ -69,6 +91,10 @@ class Dispacher:
         #params here are thread-safe???
         rSubscriber = Process(target=resultSubscriber, args=(self.uuid, len(self.urls), self.peers, self.htmls, f"{self.address}:{int(self.port) + 1}"))
         rSubscriber.start()
+        loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.uuid))
+        loginT.start()
+        #Release again when node disconnect from the network unwittingly for some reason
+        lockLogin.acquire()
 
         while len(self.htmls) != len(self.urls):
             if len(self.pool) == 0:
