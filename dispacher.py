@@ -4,6 +4,7 @@ from multiprocessing import Process, Lock
 from threading import Thread, Lock as tLock
 
 #//TODO: Find a way and a place to initialize more properly the logger for this module.
+#//TODO: It would be useful that the logger log the thread of process name to.
 logging.basicConfig(format=format, datefmt=datefmt)
 log = logging.getLogger(name="Dispacher")
 log.setLevel(logging.DEBUG)
@@ -14,7 +15,7 @@ lockLogin = tLock()
 
 def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     """
-    Get downloaded html from workers.
+    Child Process that get downloaded html from workers.
     """
     context = zmq.Context()
     socket = context.socket(zmq.REP)
@@ -24,27 +25,28 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     #connectSocketToPeers(socket, uuid, peers)
     #socket.setsockopt_string(zmq.SUBSCRIBE, "RESULT")
     i = 0
-    #//TODO: Check if 'i' is enough for this condition to be fulfilled
+    #//HACK: Check if 'i' is enough for this condition to be fulfilled
     while i < sizeUrls:
+        #//FIXME: After the received message(one full iteration) we get a ZMQError here
         res = socket.recv_json()
         if res[0] != "RESULT":
             continue
-        url, html = res[0], res[1]
+        url, html = res[1:]
         log.debug(f"GET {url} OK")
         i += 1
-        lockResults.acquire()
-        htmls.append((url, html))
+        with lockResults:
+            htmls.append((url, html))
         lockResults.release()
         #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
         
 
 def connectSocketToPeers(socket, uuid, peers):
-    lockPeers.acquire()
-    #peer = (address, port)
-    log.debug(f"Subscriber of Dispacher:{uuid} connecting to available workers")
-    for p in peers:
-        socket.connect(f"tcp://{p[0]}:{p[1]}")
-    lockPeers.release()
+    with lockPeers:
+        #peer = (address, port)
+        log.debug(f"Subscriber of Dispacher:{uuid} connecting to available workers")
+        for p in peers:
+            socket.connect(f"tcp://{p[0]}:{p[1]}")
+
 def loginToNetwork(addr, port, uuid):
     """
     Thread that enter the network when is requested.
@@ -76,7 +78,7 @@ class Dispacher:
         self.address = address
         self.port = port
 
-        self.pool = self.urls
+        self.pool = urls
         self.htmls = []
         self.peers = []
         log.debug(f"Dispacher created with uuid {uuid}")
@@ -89,18 +91,19 @@ class Dispacher:
         socket = context.socket(zmq.PUSH)
         socket.bind(f"tcp://{self.address}:{self.port}")
         #params here are thread-safe???
-        rSubscriber = Process(target=resultSubscriber, args=(self.uuid, len(self.urls), self.peers, self.htmls, f"{self.address}:{int(self.port) + 1}"))
-        rSubscriber.start()
+        pRSubscriber = Process(target=resultSubscriber, args=(self.uuid, len(self.urls), self.peers, self.htmls, f"{self.address}:{self.port + 1}"))
+        pRSubscriber.start()
+
         loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.uuid))
         loginT.start()
         #Release again when node disconnect from the network unwittingly for some reason
         lockLogin.acquire()
 
-        while len(self.htmls) != len(self.urls):
+        while True:
             if len(self.pool) == 0:
                 #Check htmls vs urls and update pool
                 log.debug(f"Waiting for update pool of Dispacher:{self.uuid}")
-                lockResults.acquire()
+                with lockResults:
                 log.debug(f"Updating pool of Dispacher:{self.uuid}")
                 responsedURLs = {html for url, html in self.htmls}
                 self.pool = self.urls - responsedURLs
@@ -113,8 +116,9 @@ class Dispacher:
         log.info(f"Dispacher:{self.uuid} has completed his URLs succefully")
         log.debug(f"Dispacher:{self.uuid} disconnecting from system")
         #disconnect
-        rSubscriber.join()
+        pRSubscriber.join()
 
 if __name__ == "__main__":
     d = Dispacher(urls, 1)
     d.dispach()
+    log.info("Dispacher:1 finish!!!")
