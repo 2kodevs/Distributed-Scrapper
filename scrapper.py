@@ -37,7 +37,7 @@ def addClient(clientId, addr, port, clients:dict, clientQueue, uuid):
     except KeyError:
         clients[clientId] = (addr, port)
         clientQueue.put((clientId, (addr, port)))  
-        log.debug(f"Client(id:{id}, address:{addr}) added to the queue of Scrapper:{uuid}")
+        log.debug(f"Client(id:{clientId}, address:{addr}) added to the queue of Scrapper:{uuid}")
     finally:
         lockClients.release()
 
