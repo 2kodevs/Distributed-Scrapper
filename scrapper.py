@@ -1,5 +1,5 @@
 import zmq, logging, time, os, requests, pickle
-from util.params import client_addr, seeds, localhost
+from util.params import seeds, localhost
 from multiprocessing import Process, Lock, Queue
 from threading import Thread, Lock as tLock
 from util.params import format, datefmt, login
@@ -20,12 +20,12 @@ def slave(tasks, uuid):
     socket = context.socket(zmq.REQ)
     while True:
         clientAddr, url = tasks.get() 
-        log.info(f"Child:{os.getpid()} of Scrapper:{self.uuid} downloading {url}")
+        log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}")
         response = requests.get(url)
-        log.debug(f"Child:{os.getpid()} of Scrapper:{self.uuid} connecting to {clientAddr}")
+        log.debug(f"Child:{os.getpid()} of Scrapper:{uuid} connecting to {clientAddr}")
         socket.connect(f"tcp://{clientAddr}")
-        log.info(f"Child:{os.getpid()} of Scrapper:{self.uuid} sending downloaded content of {url} to {clientAddr}")
-        socket.send_json(("RESULT", response))
+        log.info(f"Child:{os.getpid()} of Scrapper:{uuid} sending downloaded content of {url} to {clientAddr}")
+        socket.send_json(("RESULT", url, response.text))
         
 def addClient(clientId, addr, port, clients:dict, clientQueue, uuid):
     lockClients.acquire()
