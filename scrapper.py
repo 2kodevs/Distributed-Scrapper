@@ -49,14 +49,15 @@ def discoverClients(clients:dict, clientQueue, uuid):
     context = zmq.Context()
     socket = context.socket(zmq.SUB)
     #//HACK: Connect efficiently to the proper seed
-    socket.connect(f"tcp://{seeds[0]}")
+    socket.connect(f"tcp://{seeds[0][0]}:{seeds[0][1]}")
     socket.setsockopt(zmq.SUBSCRIBE, b"NEW_CLIENT")
     
     while True:
         [sub, contents] = socket.recv_multipart()
         #addr: (address, port)
         clientId, addr = pickle.loads(contents)
-        log.debug(f"Scrapper:{uuid} has received a new client(id:{clientId}, address:{addr[0]:addr[1]})")
+        log.debug(f"Scrapper:{uuid} has received a new subcribed message : [{sub}, {clientId}, {addr}]")
+        log.info(f"Scrapper:{uuid} has received a new client(id:{clientId}, address:{addr[0]}:{addr[1]})")
         addClient(clientId, addr[0], addr[1], clients, clientQueue, uuid)
 
 def connectToClients(socket, clientQueue, uuid):
@@ -64,9 +65,35 @@ def connectToClients(socket, clientQueue, uuid):
         lockSocketPull.acquire()
         #//TODO: Check if this is the proper port for connect socketPull
         socket.connect(f"tcp://{addr[0]}:{addr[1]}")
-        log.debug(f"Scrapper:{uuid} connected to client(id:{clientId}, address:{addr[0]:addr[1]})")
+        log.info(f"Scrapper:{uuid} connected to client(id:{clientId}, address:{addr[0]}:{addr[1]})")
         lockSocketPull.release()
 
+def publishClients(addr, port, clients:dict, clientQueue, uuid):
+    """
+    Seed's Thread responsable for publish a new client to the network.
+    """
+    context = zmq.Context()
+
+    socketPub = context.socket(zmq.PUB)
+    socketPub.bind(f"tcp://{addr}:{port}")
+    log.debug(f"Scrapper-Seed:{uuid} has binded the publisher address to {addr}:{port}.")
+
+    socketRep = context.socket(zmq.REP)
+    socketRep.bind(f"tcp://{addr}:{port + 1}")
+    log.debug(f"Scrapper-Seed:{uuid} has binded the listener for client address to {addr}:{port + 1}.")
+
+    while True:
+        #message: (login, client_id , client_address, client_port)
+        #//FIXME: After the received message(one full iteration) we get a ZMQError here (when there is no more messages)
+        msg = socketRep.recv_json()
+        log.debug(f"Scrapper-Seed:{uuid} has received a new message: {msg} -- by address:{addr}:{port + 1}")
+        if msg[0] != login:
+            continue
+        clientId , clientAddr, clientPort = msg[1:]
+        addClient(clientId, clientAddr, clientPort, clients, clientQueue, uuid)
+        log.info(f"Scrapper-Seed:{uuid} publishing new client(id:{clientId}, address:{clientAddr, clientPort})")
+        socketPub.send_multipart([b"NEW_CLIENT", pickle.dumps((clientId, (clientAddr, clientPort)))])
+        
 
 class Scrapper:
     """
@@ -88,8 +115,13 @@ class Scrapper:
         socketPull = context.socket(zmq.PULL)
          
         clientQueue = Queue()
-        discoverT = Thread(target=discoverClients, args=(self.clients, clientQueue, self.uuid))
-        connectT = Thread(target=connectToClients, args=(socketPull, clientQueue, self.uuid))
+
+        clientPubT = Thread(target=publishClients, name="clientPubT", args=(self.addr, self.port, self.clients, clientQueue, self.uuid))
+        discoverT = Thread(target=discoverClients, name="discoverT", args=(self.clients, clientQueue, self.uuid))
+        connectT = Thread(target=connectToClients, name="connectT", args=(socketPull, clientQueue, self.uuid))
+
+        if self.seed:
+            clientPubT.start()
         discoverT.start()
         connectT.start()
         
@@ -98,19 +130,20 @@ class Scrapper:
             time.sleep(5)
 
         taskQueue = Queue()
-        log.debug(f"Scrapper:{self.uuid} starting child process")
+        log.info(f"Scrapper:{self.uuid} starting child process")
         for _ in range(slaves):
             p = Process(target=slave, args=(taskQueue, self.uuid))
             p.start()
+            log.debug(f"Scrapper:{self.uuid} has started a child process with pid:{p.pid}")
 
         while True:
+            #//HACK: We need a condition here between the process, such one that we pull another task only if a slave has finish one.
             #task: (client_addr, url)
             task = socketPull.recv_json()
             log.debug(f"Pulled {task[1]} in worker:{self.uuid}")
             taskQueue.put(task)
 
-    #//TODO: Create seed methods.
             
 if __name__ == "__main__":
-    s = Scrapper(2)
+    s = Scrapper(2, port=8101, seed=True)
     s.manage(2)
