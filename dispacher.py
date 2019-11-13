@@ -2,12 +2,12 @@ import zmq, logging, json, time
 from util.params import format, datefmt, urls, seeds, login
 from multiprocessing import Process, Lock
 from threading import Thread, Lock as tLock
+from util.utils import parseLevel
 
 #//TODO: Find a way and a place to initialize more properly the logger for this module.
 #//TODO: It would be useful that the logger log the thread of process name to.
 logging.basicConfig(format=format, datefmt=datefmt)
 log = logging.getLogger(name="Dispacher")
-log.setLevel(logging.DEBUG)
 
 lockResults = Lock()
 lockPeers = Lock()
@@ -128,7 +128,25 @@ class Dispacher:
         #disconnect
         pRSubscriber.join()
 
-if __name__ == "__main__":
-    d = Dispacher(urls, 1)
+def main(args):
+    log.setLevel(parseLevel(args.level))
+    d = Dispacher(urls, 1, args.address, args.port)
     d.dispach()
     log.info("Dispacher:1 finish!!!")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Client of a distibuted scrapper')
+    parser.add_argument('-p', '--port', type=int, default=4142, help='connection port')
+    parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
+    parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
+
+    #//TODO: use another arg to set the path to a file that contains the set of urls
+
+    args = parser.parse_args()
+
+    log.debug(args)
+
+    main(args)
