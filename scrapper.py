@@ -3,10 +3,10 @@ from util.params import seeds, localhost
 from multiprocessing import Process, Lock, Queue
 from threading import Thread, Lock as tLock
 from util.params import format, datefmt, login
+from util.utils import parseLevel
 
 logging.basicConfig(format=format, datefmt=datefmt)
 log = logging.getLogger(name="Scrapper")
-log.setLevel(logging.DEBUG)
 
 lockQueue = Lock()
 lockClients = tLock()
@@ -142,7 +142,23 @@ class Scrapper:
             log.debug(f"Pulled {task[1]} in worker:{self.uuid}")
             taskQueue.put(task)
 
+def main(args):
+    log.setLevel(parseLevel(args.level))
+    s = Scrapper(2, port=args.port, seed=args.seed, address=args.address)
+    s.manage(2)
             
 if __name__ == "__main__":
-    s = Scrapper(2, port=8101, seed=True)
-    s.manage(2)
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Worker of a distibuted scrapper')
+    parser.add_argument('-p', '--port', type=int, default=8301, help='connection port')
+    parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
+    parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
+    parser.add_argument('-s', '--seed', action='store_true')
+
+    args = parser.parse_args()
+
+    log.debug(args)
+
+    main(args)
+    
