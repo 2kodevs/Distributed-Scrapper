@@ -35,7 +35,7 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
         if res[0] != "RESULT":
             continue
         url, html = res[1:]
-        log.debug(f"GET {url} OK")
+        log.info(f"GET {url} OK")
         i += 1
         with lockResults:
             htmls.append((url, html))
