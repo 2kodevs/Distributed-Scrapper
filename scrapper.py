@@ -62,10 +62,9 @@ def discoverClients(clients:dict, clientQueue, uuid):
 
 def connectToClients(socket, clientQueue, uuid):
     for clientId, addr in iter(clientQueue.get, "STOP"):
-        lockSocketPull.acquire()
-        socket.connect(f"tcp://{addr[0]}:{addr[1]}")
-        log.info(f"Scrapper:{uuid} connected to client(id:{clientId}, address:{addr[0]}:{addr[1]})")
-        lockSocketPull.release()
+        with lockSocketPull:
+            socket.connect(f"tcp://{addr[0]}:{addr[1]}")
+            log.info(f"Scrapper:{uuid} connected to client(id:{clientId}, address:{addr[0]}:{addr[1]})")
 
 def publishClients(addr, port, clients:dict, clientQueue, uuid):
     """
@@ -157,8 +156,6 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--seed', action='store_true')
 
     args = parser.parse_args()
-
-    log.debug(args)
 
     main(args)
     
