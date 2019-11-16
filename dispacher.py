@@ -45,13 +45,14 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
             change = True
         #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
         
-
+        
 def connectSocketToPeers(socket, uuid, peers):
     with lockPeers:
         #peer = (address, port)
         log.debug(f"Subscriber of Dispacher:{uuid} connecting to available workers")
         for p in peers:
             socket.connect(f"tcp://{p[0]}:{p[1]}")
+
 
 def loginToNetwork(addr, port, uuid):
     """
@@ -116,7 +117,7 @@ class Dispacher:
                 #//HACK: For now the condition for the pool to be updated is that we get a result, but this is no correct because a worker can die without finish his task.
                     if change:
                         log.debug(f"Updating pool of Dispacher:{self.uuid}")
-                        responsedURLs = {html for url, html in self.htmls}
+                        responsedURLs = {url for url, _ in self.htmls}
                         self.pool = self.urls - responsedURLs
                         change = False
             try:
@@ -132,6 +133,7 @@ class Dispacher:
         log.debug(f"Dispacher:{self.uuid} disconnecting from system")
         #disconnect
         pRSubscriber.join()
+
 
 def main(args):
     log.setLevel(parseLevel(args.level))
