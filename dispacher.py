@@ -30,11 +30,14 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     i = 0
     #//HACK: Check if 'i' is enough for this condition to be fulfilled
     while i < sizeUrls:
-        #//FIXME: After the received message(one full iteration) we get a ZMQError here
         res = socket.recv_json()
+        #nothing important to send
+        socket.send(b"Done")
         if res[0] != "RESULT":
             continue
         url, html = res[1:]
+        with open(f"results/html{i}", "w") as fd:
+            fd.write(html)
         log.info(f"GET {url} OK")
         i += 1
         with lockResults:
@@ -68,6 +71,8 @@ def loginToNetwork(addr, port, uuid):
             #//HACK: This send message to all conections of the socket or to only one?
             log.debug(f"Dispacher:{uuid} sending message of login to seeds")
             socket.send_json((login, uuid, addr, port))
+            #nothing important to receive
+            socket.recv()
         time.sleep(1)
 
 

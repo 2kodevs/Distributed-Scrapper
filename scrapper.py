@@ -26,6 +26,8 @@ def slave(tasks, uuid):
         socket.connect(f"tcp://{clientAddr}")
         log.info(f"Child:{os.getpid()} of Scrapper:{uuid} sending downloaded content of {url} to {clientAddr}")
         socket.send_json(("RESULT", url, response.text))
+        #nothing important to receive
+        socket.recv()
         
 def addClient(clientId, addr, port, clients:dict, clientQueue, uuid):
     lockClients.acquire()
@@ -82,8 +84,9 @@ def publishClients(addr, port, clients:dict, clientQueue, uuid):
 
     while True:
         #message: (login, client_id , client_address, client_port)
-        #//FIXME: After the received message(one full iteration) we get a ZMQError here (when there is no more messages)
         msg = socketRep.recv_json()
+        #nothing important to send
+        socketRep.send(b"Done")
         log.debug(f"Scrapper-Seed:{uuid} has received a new message: {msg} -- by address:{addr}:{port + 1}")
         if msg[0] != login:
             continue
@@ -97,7 +100,7 @@ class Scrapper:
     """
     Represents a scrapper, the worker node in the Scrapper network.
     """
-    def __init__(self, uuid, address=localhost, port=8301, seed=False):
+    def __init__(self, uuid, address=localhost, port=8101, seed=False):
         self.uuid = uuid
         self.clients = dict()
         self.addr = address
@@ -150,7 +153,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='Worker of a distibuted scrapper')
-    parser.add_argument('-p', '--port', type=int, default=8301, help='connection port')
+    parser.add_argument('-p', '--port', type=int, default=8101, help='connection port')
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
     parser.add_argument('-s', '--seed', action='store_true')
