@@ -36,8 +36,8 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
         if res[0] != "RESULT":
             continue
         url, html = res[1:]
-        fd = open(f"html{i}", "w")
-        fd.write(html)
+        with open(f"results/html{i}", "w") as fd:
+            fd.write(html)
         log.info(f"GET {url} OK")
         i += 1
         with lockResults:
