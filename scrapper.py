@@ -5,6 +5,7 @@ from ctypes import c_int
 from threading import Thread, Lock as tLock
 from util.params import format, datefmt, login
 from util.utils import parseLevel
+from time import sleep
 
 logging.basicConfig(format=format, datefmt=datefmt)
 log = logging.getLogger(name="Scrapper")
@@ -22,7 +23,8 @@ def slave(tasks, uuid):
     socket = context.socket(zmq.REQ)
     while True:
         clientAddr, url = tasks.get() 
-        availableSlaves.value -= 1
+        with availableSlaves.get_lock():
+            availableSlaves.value -= 1
         log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}")
         response = requests.get(url)
         log.debug(f"Child:{os.getpid()} of Scrapper:{uuid} connecting to {clientAddr}")
@@ -31,7 +33,8 @@ def slave(tasks, uuid):
         socket.send_json(("RESULT", url, response.text))
         #nothing important to receive
         socket.recv()
-        availableSlaves.value += 1
+        with availableSlaves.get_lock():
+            availableSlaves.value += 1
   
         
 def addClient(clientId, addr, port, clients:dict, clientQueue, uuid):
@@ -146,10 +149,12 @@ class Scrapper:
         while True:
             #//HACK: We need a condition here between the process, such one that we pull another task only if a slave has finish one.
             #task: (client_addr, url)
-            if availableSlaves.value > 0:
-                task = socketPull.recv_json()
-                log.debug(f"Pulled {task[1]} in worker:{self.uuid}")
-                taskQueue.put(task)                    
+            with availableSlaves.get_lock():
+                if availableSlaves.value > 0:
+                    task = socketPull.recv_json()
+                    log.debug(f"Pulled {task[1]} in worker:{self.uuid}")
+                    taskQueue.put(task)
+            sleep(1)                    
 
 
 def main(args):
