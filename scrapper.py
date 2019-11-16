@@ -84,7 +84,6 @@ def publishClients(addr, port, clients:dict, clientQueue, uuid):
 
     while True:
         #message: (login, client_id , client_address, client_port)
-        #//FIXME: After the received message(one full iteration) we get a ZMQError here (when there is no more messages)
         msg = socketRep.recv_json()
         #nothing important to send
         socketRep.send(b"Done")
@@ -101,7 +100,7 @@ class Scrapper:
     """
     Represents a scrapper, the worker node in the Scrapper network.
     """
-    def __init__(self, uuid, address=localhost, port=8301, seed=False):
+    def __init__(self, uuid, address=localhost, port=8101, seed=False):
         self.uuid = uuid
         self.clients = dict()
         self.addr = address

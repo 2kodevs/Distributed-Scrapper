@@ -30,7 +30,6 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     i = 0
     #//HACK: Check if 'i' is enough for this condition to be fulfilled
     while i < sizeUrls:
-        #//FIXME: After the received message(one full iteration) we get a ZMQError here
         res = socket.recv_json()
         #nothing important to send
         socket.send(b"Done")
