@@ -45,13 +45,14 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
             change = True
         #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
         
-
+        
 def connectSocketToPeers(socket, uuid, peers):
     with lockPeers:
         #peer = (address, port)
         log.debug(f"Subscriber of Dispacher:{uuid} connecting to available workers")
         for p in peers:
             socket.connect(f"tcp://{p[0]}:{p[1]}")
+
 
 def loginToNetwork(addr, port, uuid):
     """
@@ -114,9 +115,11 @@ class Dispacher:
                 log.debug(f"Waiting for update pool of Dispacher:{self.uuid}")
                 with lockResults:
                 #//HACK: For now the condition for the pool to be updated is that we get a result, but this is no correct because a worker can die without finish his task.
+                    #//FIXME: change is no shared between pRSubscriber process
                     if change:
                         log.debug(f"Updating pool of Dispacher:{self.uuid}")
-                        responsedURLs = {html for url, html in self.htmls}
+                        #//FIXME: self.htmls is no shared between pRSubscriber process
+                        responsedURLs = {url for url, _ in self.htmls}
                         self.pool = self.urls - responsedURLs
                         change = False
             try:
@@ -124,14 +127,17 @@ class Dispacher:
                 log.debug(f"Pushing {url} from Dispacher:{self.uuid}")
                 socket.send_json((f"{self.address}:{self.port + 1}",url))
             except IndexError:
-                if len(self.urls) == len(self.htmls):
-                    break
+                with lockResults:
+                    #//FIXME: self.htmls is no shared between pRSubscriber process
+                    if len(self.urls) == len(self.htmls):
+                        break
                 time.sleep(5)
 
         log.info(f"Dispacher:{self.uuid} has completed his URLs succefully")
         log.debug(f"Dispacher:{self.uuid} disconnecting from system")
         #disconnect
         pRSubscriber.join()
+
 
 def main(args):
     log.setLevel(parseLevel(args.level))
