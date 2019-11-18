@@ -2,7 +2,7 @@ import zmq, logging, json, time
 from util.params import format, datefmt, urls, seeds, login
 from multiprocessing import Process, Lock
 from threading import Thread, Lock as tLock
-from util.utils import parseLevel
+from util.utils import parseLevel, makeUuid
 
 #//TODO: Find a way and a place to initialize more properly the logger for this module.
 #//TODO: It would be useful that the logger log the thread of process name to.
@@ -25,8 +25,6 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     log.debug(f"Subscriber to results of Dispatcher:{uuid} created")
     global change
 
-    #connectSocketToPeers(socket, uuid, peers)
-    #socket.setsockopt_string(zmq.SUBSCRIBE, "RESULT")
     i = 0
     #//HACK: Check if 'i' is enough for this condition to be fulfilled
     while i < sizeUrls:
@@ -43,8 +41,7 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
         with lockResults:
             htmls.append((url, html))
             change = True
-        #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
-        
+
         
 def connectSocketToPeers(socket, uuid, peers):
     with lockPeers:
@@ -84,6 +81,7 @@ class Dispatcher:
     def __init__(self, urls, uuid, address="127.0.0.1", port=4142):
         self.urls = set(urls)
         self.uuid = uuid
+        self.idToLog = str(uuid)[:10]
         self.address = address
         self.port = port
 
@@ -101,10 +99,10 @@ class Dispatcher:
         socket.bind(f"tcp://{self.address}:{self.port}")
         global change
         #params here are thread-safe???
-        pRSubscriber = Process(target=resultSubscriber, args=(self.uuid, len(self.urls), self.peers, self.htmls, f"{self.address}:{self.port + 1}"))
+        pRSubscriber = Process(target=resultSubscriber, args=(self.idToLog, len(self.urls), self.peers, self.htmls, f"{self.address}:{self.port + 1}"))
         pRSubscriber.start()
 
-        loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.uuid))
+        loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.idToLog))
         loginT.start()
         #Release again when node disconnect from the network unwittingly for some reason
         lockLogin.acquire()
@@ -112,19 +110,19 @@ class Dispatcher:
         while True:
             if len(self.pool) == 0:
                 #Check htmls vs urls and update pool
-                log.debug(f"Waiting for update pool of Dispatcher:{self.uuid}")
+                log.debug(f"Waiting for update pool of Dispatcher:{self.idToLog}")
                 with lockResults:
                 #//HACK: For now the condition for the pool to be updated is that we get a result, but this is no correct because a worker can die without finish his task.
                     #//FIXME: change is no shared between pRSubscriber process
                     if change:
-                        log.debug(f"Updating pool of Dispatcher:{self.uuid}")
+                        log.debug(f"Updating pool of Dispatcher:{self.idToLog}")
                         #//FIXME: self.htmls is no shared between pRSubscriber process
                         responsedURLs = {url for url, _ in self.htmls}
                         self.pool = self.urls - responsedURLs
                         change = False
             try:
                 url = self.pool.pop()
-                log.debug(f"Pushing {url} from Dispatcher:{self.uuid}")
+                log.debug(f"Pushing {url} from Dispatcher:{self.idToLog}")
                 socket.send_json((f"{self.address}:{self.port + 1}",url))
             except IndexError:
                 with lockResults:
@@ -141,9 +139,10 @@ class Dispatcher:
 
 def main(args):
     log.setLevel(parseLevel(args.level))
-    d = Dispatcher(urls, 1, args.address, args.port)
+    uuid = makeUuid(2**55, urls)
+    d = Dispatcher(urls, uuid, args.address, args.port)
     d.dispach()
-    log.info("Dispatcher:1 finish!!!")
+    log.info(f"Dispatcher:{uuid} finish!!!")
 
 
 if __name__ == "__main__":
