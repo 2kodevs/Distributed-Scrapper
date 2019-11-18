@@ -5,7 +5,6 @@ from ctypes import c_int
 from threading import Thread, Lock as tLock
 from util.params import format, datefmt, login
 from util.utils import parseLevel
-from time import sleep
 
 logging.basicConfig(format=format, datefmt=datefmt)
 log = logging.getLogger(name="Scrapper")
@@ -101,6 +100,7 @@ def publishClients(addr, port, clients:dict, clientQueue, uuid):
         clientId , clientAddr, clientPort = msg[1:]
         addClient(clientId, clientAddr, clientPort, clients, clientQueue, uuid)
         log.info(f"Scrapper-Seed:{uuid} publishing new client(id:{clientId}, address:{clientAddr, clientPort})")
+        #//TODO: We need to publish all the clients from time to time, because if a scrapper joins to the network after a publish, he will never be aware of that client.
         socketPub.send_multipart([b"NEW_CLIENT", pickle.dumps((clientId, (clientAddr, clientPort)))])
 
         
@@ -147,14 +147,13 @@ class Scrapper:
             log.debug(f"Scrapper:{self.uuid} has started a child process with pid:{p.pid}")
 
         while True:
-            #//HACK: We need a condition here between the process, such one that we pull another task only if a slave has finish one.
             #task: (client_addr, url)
             with availableSlaves.get_lock():
                 if availableSlaves.value > 0:
                     task = socketPull.recv_json()
                     log.debug(f"Pulled {task[1]} in worker:{self.uuid}")
                     taskQueue.put(task)
-            sleep(1)                    
+            time.sleep(1)                    
 
 
 def main(args):
@@ -175,4 +174,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args)
-    
