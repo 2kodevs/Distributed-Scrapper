@@ -116,7 +116,7 @@ class Dispatcher:
                     #//HACK: Maybe you don't have that urls
                     index = idx[url]
                     if msg == "RESULT" and self.status[index] != 2:
-                        with open(f"results/html{index}", "w") as fd:
+                        with open(f"downloads/html{index}", "w") as fd:
                             log.info(f"{url} saved")
                             fd.write(data)
                         self.status[index] = 2
