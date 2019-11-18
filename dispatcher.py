@@ -7,7 +7,7 @@ from util.utils import parseLevel
 #//TODO: Find a way and a place to initialize more properly the logger for this module.
 #//TODO: It would be useful that the logger log the thread of process name to.
 logging.basicConfig(format=format, datefmt=datefmt)
-log = logging.getLogger(name="Dispacher")
+log = logging.getLogger(name="Dispatcher")
 
 lockResults = Lock()
 lockPeers = Lock()
@@ -22,7 +22,7 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.bind(f"tcp://{addr}")
-    log.debug(f"Subscriber to results of Dispacher:{uuid} created")
+    log.debug(f"Subscriber to results of Dispatcher:{uuid} created")
     global change
 
     #connectSocketToPeers(socket, uuid, peers)
@@ -49,7 +49,7 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
 def connectSocketToPeers(socket, uuid, peers):
     with lockPeers:
         #peer = (address, port)
-        log.debug(f"Subscriber of Dispacher:{uuid} connecting to available workers")
+        log.debug(f"Subscriber of Dispatcher:{uuid} connecting to available workers")
         for p in peers:
             socket.connect(f"tcp://{p[0]}:{p[1]}")
 
@@ -62,22 +62,22 @@ def loginToNetwork(addr, port, uuid):
         with lockLogin:
             context = zmq.Context()
             socket = context.socket(zmq.REQ)
-            log.debug(f"Dispacher:{uuid} connecting to a seed")
+            log.debug(f"Dispatcher:{uuid} connecting to a seed")
             #//HACK: Connect only to one seed per subnet. Or not?
             for sa, sp in seeds:
                 socket.connect(f"tcp://{sa}:{sp + 1}")
-                log.debug(f"Dispacher:{uuid} connected to seed --- {sa}:{sp + 1}")
+                log.debug(f"Dispatcher:{uuid} connected to seed --- {sa}:{sp + 1}")
 
             #message: (login, client_id , client_address, client_port)
             #//HACK: This send message to all conections of the socket or to only one?
-            log.debug(f"Dispacher:{uuid} sending message of login to seeds")
+            log.debug(f"Dispatcher:{uuid} sending message of login to seeds")
             socket.send_json((login, uuid, addr, port))
             #nothing important to receive
             socket.recv()
         time.sleep(1)
 
 
-class Dispacher:
+class Dispatcher:
     """
     Represents a client to the services of the Scrapper.
     """
@@ -90,11 +90,11 @@ class Dispacher:
         self.pool = urls
         self.htmls = []
         self.peers = []
-        log.debug(f"Dispacher created with uuid {uuid}")
+        log.debug(f"Dispatcher created with uuid {uuid}")
         
     def dispach(self):
         """
-        Start to serve the dispacher.
+        Start to serve the Dispatcher.
         """
         context = zmq.Context()
         socket = context.socket(zmq.PUSH)
@@ -112,19 +112,19 @@ class Dispacher:
         while True:
             if len(self.pool) == 0:
                 #Check htmls vs urls and update pool
-                log.debug(f"Waiting for update pool of Dispacher:{self.uuid}")
+                log.debug(f"Waiting for update pool of Dispatcher:{self.uuid}")
                 with lockResults:
                 #//HACK: For now the condition for the pool to be updated is that we get a result, but this is no correct because a worker can die without finish his task.
                     #//FIXME: change is no shared between pRSubscriber process
                     if change:
-                        log.debug(f"Updating pool of Dispacher:{self.uuid}")
+                        log.debug(f"Updating pool of Dispatcher:{self.uuid}")
                         #//FIXME: self.htmls is no shared between pRSubscriber process
                         responsedURLs = {url for url, _ in self.htmls}
                         self.pool = self.urls - responsedURLs
                         change = False
             try:
                 url = self.pool.pop()
-                log.debug(f"Pushing {url} from Dispacher:{self.uuid}")
+                log.debug(f"Pushing {url} from Dispatcher:{self.uuid}")
                 socket.send_json((f"{self.address}:{self.port + 1}",url))
             except IndexError:
                 with lockResults:
@@ -133,17 +133,17 @@ class Dispacher:
                         break
                 time.sleep(5)
 
-        log.info(f"Dispacher:{self.uuid} has completed his URLs succefully")
-        log.debug(f"Dispacher:{self.uuid} disconnecting from system")
+        log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully")
+        log.debug(f"Dispatcher:{self.uuid} disconnecting from system")
         #disconnect
         pRSubscriber.join()
 
 
 def main(args):
     log.setLevel(parseLevel(args.level))
-    d = Dispacher(urls, 1, args.address, args.port)
+    d = Dispatcher(urls, 1, args.address, args.port)
     d.dispach()
-    log.info("Dispacher:1 finish!!!")
+    log.info("Dispatcher:1 finish!!!")
 
 
 if __name__ == "__main__":
