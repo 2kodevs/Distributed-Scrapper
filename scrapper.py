@@ -103,6 +103,15 @@ def publishClients(addr, port, clients:dict, clientQueue, uuid):
         #//TODO: We need to publish all the clients from time to time, because if a scrapper joins to the network after a publish, he will never be aware of that client.
         socketPub.send_multipart([b"NEW_CLIENT", pickle.dumps((clientId, (clientAddr, clientPort)))])
 
+
+def listener(addr, port):
+    socket = zmq.Context().socket(zmq.REP)
+    socket.bind(f"tcp://{addr}:{port}")
+    
+    while True:
+        res = socket.recv_json()
+        socket.send_json(True)
+    
         
 class Scrapper:
     """
@@ -128,11 +137,13 @@ class Scrapper:
         clientPubT = Thread(target=publishClients, name="clientPubT", args=(self.addr, self.port, self.clients, clientQueue, self.uuid))
         discoverT = Thread(target=discoverClients, name="discoverT", args=(self.clients, clientQueue, self.uuid))
         connectT = Thread(target=connectToClients, name="connectT", args=(socketPull, clientQueue, self.uuid))
+        listen = Process(target=listener, args=(self.addr, self.port + 2))
 
         if self.seed:
             clientPubT.start()
         discoverT.start()
         connectT.start()
+        listen.start()
         
         while len(self.clients) == 0:
             log.debug(f"Scrapper:{self.uuid} waiting for clients")
@@ -150,9 +161,15 @@ class Scrapper:
             #task: (client_addr, url)
             with availableSlaves.get_lock():
                 if availableSlaves.value > 0:
-                    task = socketPull.recv_json()
-                    log.debug(f"Pulled {task[1]} in worker:{self.uuid}")
-                    taskQueue.put(task)
+                    addr, url = socketPull.recv_json()
+                    log.debug(f"Pulled {url} in worker:{self.uuid}")
+                    #//FIXME: what happend if client die
+                    taskQueue.put((addr, url))
+                    socket = context.socket(zmq.REQ)
+                    socket.connect(f"tcp://{addr}")
+                    socket.send_json(("PULLED", url, f"tcp://{self.addr}:{self.port + 2}"))
+                    #nothing important to receive
+                    socket.recv()
             time.sleep(1)                    
 
 
