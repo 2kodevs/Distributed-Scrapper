@@ -1,9 +1,9 @@
 
 edit: ## Open the Makefile in editor
-	gedit Makefile
+	code Makefile
 
-dispacher: ## Run a dispacher with default params
-	python dispacher.py
+dispatcher: ## Run a dispatcher with default params
+	python dispatcher.py
 
 seeder: ## Run a scrapper with default params and seeder flag on
 	python scrapper.py -s
