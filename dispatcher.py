@@ -3,8 +3,8 @@ from util.params import format, datefmt, urls, seeds, login
 from multiprocessing import Process, Lock, Queue
 from multiprocessing.queues import Empty as Empty_Queue
 from threading import Thread, Lock as tLock
-from util.utils import parseLevel
 from util.colors import GREEN, RESET
+from util.utils import parseLevel, makeUuid
 
 #//TODO: Find a way and a place to initialize more properly the logger for this module.
 #//TODO: It would be useful that the logger log the thread of process name to.
@@ -24,8 +24,6 @@ def resultSubscriber(uuid, sizeUrls, peers, addr, msg_queue):
     socket.bind(f"tcp://{addr}")
     log.debug(f"Subscriber to results of Dispatcher:{uuid} created")
 
-    #connectSocketToPeers(socket, uuid, peers)
-    #socket.setsockopt_string(zmq.SUBSCRIBE, "RESULT")
     i = 0
     #//HACK: Check if 'i' is enough for this condition to be fulfilled
     while i < sizeUrls:
@@ -37,10 +35,11 @@ def resultSubscriber(uuid, sizeUrls, peers, addr, msg_queue):
             i += 1
         elif res[0] != "PULLED":
             continue
+       
         msg_queue.put(res)
         #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
-        
-        
+   
+  
 def connectSocketToPeers(socket, uuid, peers):
     with lockPeers:
         #peer = (address, port)
@@ -72,8 +71,8 @@ def loginToNetwork(addr, port, uuid):
         time.sleep(1)
 
 
-def downloadsWriter(queque):
-    for index, url, data in iter(queque.get, "STOP"):
+def downloadsWriter(queue):
+    for index, url, data in iter(queue.get, "STOP"):
         with open(f"downloads/html{index}", "w") as fd:
             log.info(f"{url} saved")
             fd.write(data)
@@ -91,7 +90,7 @@ def workersVerifier(workers, toPush):
         except Exception as e:
             log.error(f"worker at {addr} abandoned {url}")
             toPush.put(idx)
-    log.debug("exit verifier")      
+    log.debug("Exit verifier")      
     
     
 class Dispatcher:
@@ -103,6 +102,7 @@ class Dispatcher:
         self.size = len(self.urls)
         self.status = [0] * self.size
         self.uuid = uuid
+        self.idToLog = str(uuid)[:10]
         self.address = address
         self.port = port
 
@@ -120,20 +120,20 @@ class Dispatcher:
         socket = context.socket(zmq.PUSH)
         socket.bind(f"tcp://{self.address}:{self.port}")
 
-        #params here are thread-safe???
         msg_queue = Queue()
         downloadsQueue = Queue()
         workersQueue = Queue()
         toPushQueue = Queue()
         args = (self.uuid, self.size, self.peers, f"{self.address}:{self.port + 1}", msg_queue)
         pRSubscriber = Process(target=resultSubscriber, args=args)
+
         pRSubscriber.start()
         pWriter = Process(target=downloadsWriter, args=(downloadsQueue,))
         pWriter.start()
         pVerifier = Process(target=workersVerifier, args=(workersQueue, toPushQueue))
         pVerifier.start()
 
-        loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.uuid))
+        loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.idToLog))
         loginT.start()
         #Release again when node disconnect from the network unwittingly for some reason
         lockLogin.acquire()
@@ -142,9 +142,10 @@ class Dispatcher:
         while True:
             if len(self.pool) == 0:
                 #Check htmls vs urls and update pool
-                #log.debug(f"Waiting for update pool of Dispatcher:{self.uuid}")
+                log.debug(f"Updating pool of Dispatcher:{self.idToLog}")
                 while True:
                     try:
+                        #//HACK: Maybe all processing done in this try, can be done better by a thread
                         msg, url, data = msg_queue.get(block=False)
                         #//HACK: Maybe you don't have that urls
                         index = idx[url]
@@ -171,11 +172,11 @@ class Dispatcher:
                         workersQueue.put((i, self.urls[i], status))
             if len(self.pool):
                 url = self.pool.pop()
-                log.debug(f"Pushing {url} from Dispatcher:{self.uuid}")
-                socket.send_json((f"{self.address}:{self.port + 1}",url))
+                log.debug(f"Pushing {url} from Dispatcher:{self.idToLog}")
+                socket.send_json((f"{self.address}:{self.port + 1}", url))
             else:
                 if self.pending == 0:
-                        break
+                	break
         
 
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully")
@@ -190,9 +191,11 @@ class Dispatcher:
 
 def main(args):
     log.setLevel(parseLevel(args.level))
-    d = Dispatcher(urls, 1, args.address, args.port)
-    d.dispatch()
-    log.info("Dispatcher:1 finish!!!")
+    
+    uuid = makeUuid(2**55, urls)
+    d = Dispatcher(urls, uuid, args.address, args.port)
+    d.dispach()
+    log.info(f"Dispatcher:{uuid} finish!!!")
 
 
 if __name__ == "__main__":
