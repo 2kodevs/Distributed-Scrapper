@@ -1,6 +1,7 @@
 import zmq, logging, json, time
 from util.params import format, datefmt, urls, seeds, login
 from multiprocessing import Process, Lock, Queue
+from multiprocessing.queues import Empty as Empty_Queue
 from threading import Thread, Lock as tLock
 from util.utils import parseLevel
 from util.colors import GREEN, RESET
@@ -69,6 +70,28 @@ def loginToNetwork(addr, port, uuid):
         time.sleep(1)
 
 
+def downloadsWriter(queque):
+    while True:
+        index, url, data = queque.get()
+        with open(f"downloads/html{index}", "w") as fd:
+            log.info(f"{url} saved")
+            fd.write(data)
+  
+            
+def workersVerifier(workers, toPush):
+    context = zmq.Context()
+    while True:
+        idx, url, addr = workers.get()
+        try:
+            conn_sock = context.socket(zmq.REQ)
+            conn_sock.connect(addr)
+            conn_sock.send_json(url)
+            assert conn_sock.recv_json()
+        except Exception as e:
+            log.error(f"worker at {addr} abandoned {url}")
+            toPush.put(idx)      
+    
+    
 class Dispatcher:
     """
     Represents a client to the services of the Scrapper.
@@ -82,7 +105,7 @@ class Dispatcher:
         self.port = port
 
         self.pending = self.size
-        self.pool = urls
+        self.pool = []
         self.htmls = [None] * self.size
         self.peers = []
         log.debug(f"Dispatcher created with uuid {uuid}")
@@ -94,12 +117,19 @@ class Dispatcher:
         context = zmq.Context()
         socket = context.socket(zmq.PUSH)
         socket.bind(f"tcp://{self.address}:{self.port}")
-        global change
+
         #params here are thread-safe???
         msg_queue = Queue()
+        downloadsQueue = Queue()
+        workersQueue = Queue()
+        toPushQueue = Queue()
         args = (self.uuid, self.size, self.peers, f"{self.address}:{self.port + 1}", msg_queue)
         pRSubscriber = Process(target=resultSubscriber, args=args)
         pRSubscriber.start()
+        pWriter = Process(target=downloadsWriter, args=(downloadsQueue,))
+        pWriter.start()
+        pVerifier = Process(target=workersVerifier, args=(workersQueue, toPushQueue))
+        pVerifier.start()
 
         loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.uuid))
         loginT.start()
@@ -110,31 +140,33 @@ class Dispatcher:
         while True:
             if len(self.pool) == 0:
                 #Check htmls vs urls and update pool
-                log.debug(f"Waiting for update pool of Dispatcher:{self.uuid}")
-                while not msg_queue.empty():
-                    msg, url, data = msg_queue.get()
-                    #//HACK: Maybe you don't have that urls
-                    index = idx[url]
-                    if msg == "RESULT" and self.status[index] != 2:
-                        with open(f"downloads/html{index}", "w") as fd:
-                            log.info(f"{url} saved")
-                            fd.write(data)
-                        self.status[index] = 2
-                        self.pending -= 1
-                    elif msg == "PULLED":
-                        self.status[index] = data
+                #log.debug(f"Waiting for update pool of Dispatcher:{self.uuid}")
+                while True:
+                    try:
+                        msg, url, data = msg_queue.get(block=False)
+                        #//HACK: Maybe you don't have that urls
+                        index = idx[url]
+                        if msg == "RESULT" and self.status[index] != 2:
+                            downloadsQueue.put((index, url, data))
+                            self.status[index] = 2
+                            self.pending -= 1
+                        elif msg == "PULLED":
+                            self.status[index] = data
+                    except Empty_Queue:
+                        break
+                while True:
+                    try:
+                        index = toPushQueue.get(block=False)
+                        log.debug(f"Preparing {url} for PUSH again")
+                        self.status[index] = 0
+                    except Empty_Queue:
+                        break
                 for i, status in enumerate(self.status):
                     if status == 0:
                         self.pool.append(self.urls[i])
                         self.status[i] = 1
                     elif isinstance(status, str):
-                        try:
-                            conn_sock = context.socket(zmq.REQ)
-                            conn_sock.connect(status)
-                            conn_sock.send_json(self.urls[i])
-                            assert conn_sock.recv_json()
-                        except:
-                            self.status[i] = 0
+                        workersQueue.put((i, self.urls[i], status))
             if len(self.pool):
                 url = self.pool.pop()
                 log.debug(f"Pushing {url} from Dispatcher:{self.uuid}")
@@ -142,13 +174,13 @@ class Dispatcher:
             else:
                 if self.pending == 0:
                         break
-            time.sleep(5)
+        
 
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully")
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system")
         #disconnect
         pRSubscriber.join()
-
+        
 
 def main(args):
     log.setLevel(parseLevel(args.level))
