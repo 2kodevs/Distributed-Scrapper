@@ -71,11 +71,11 @@ def loginToNetwork(addr, port, uuid):
 
 
 def downloadsWriter(queque):
-    while True:
-        index, url, data = queque.get()
+    for index, url, data in iter(queque.get, "STOP"):
         with open(f"downloads/html{index}", "w") as fd:
             log.info(f"{url} saved")
             fd.write(data)
+    log.debug("All data saved")
   
             
 def workersVerifier(workers, toPush):
@@ -179,7 +179,9 @@ class Dispatcher:
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully")
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system")
         #disconnect
+        downloadsQueue.put("STOP")
         pRSubscriber.join()
+        pWriter.join()
         
 
 def main(args):
