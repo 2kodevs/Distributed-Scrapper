@@ -1,10 +1,9 @@
 from util.colors import * 
 
 urls = [
-    "http://www.cubadebate.cu/",
-    "https://rpyc.readthedocs.io/en/latest/tutorial/tut3.html",
-    "https://gobyexample.com/",
-    "https://www.wikipedia.org/"
+    "http://www.cubadebate.cu",
+    "http://www.bohemia.cu",
+    "http://www.juventudrebelde.cu"
 ]
 
 format  = f'{BLUEB}%(asctime)s{RESET} - {RED}%(levelname)s{RESET} - {GREEN}%(name)s{RESET} - %(message)s'

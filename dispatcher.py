@@ -1,7 +1,9 @@
 import zmq, logging, json, time
 from util.params import format, datefmt, urls, seeds, login
-from multiprocessing import Process, Lock
+from multiprocessing import Process, Lock, Queue
+from multiprocessing.queues import Empty as Empty_Queue
 from threading import Thread, Lock as tLock
+from util.colors import GREEN, RESET
 from util.utils import parseLevel, makeUuid
 
 #//TODO: Find a way and a place to initialize more properly the logger for this module.
@@ -13,9 +15,7 @@ lockResults = Lock()
 lockPeers = Lock()
 lockLogin = tLock()
 
-change = False
-
-def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
+def resultSubscriber(uuid, sizeUrls, peers, addr, msg_queue):
     """
     Child Process that get downloaded html from workers.
     """
@@ -23,7 +23,6 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
     socket = context.socket(zmq.REP)
     socket.bind(f"tcp://{addr}")
     log.debug(f"Subscriber to results of Dispatcher:{uuid} created")
-    global change
 
     i = 0
     #//HACK: Check if 'i' is enough for this condition to be fulfilled
@@ -31,18 +30,16 @@ def resultSubscriber(uuid, sizeUrls, peers, htmls, addr):
         res = socket.recv_json()
         #nothing important to send
         socket.send(b"Done")
-        if res[0] != "RESULT":
+        if res[0] == "RESULT":
+            log.info(f"GET {res[1]} {GREEN}OK{RESET}")
+            i += 1
+        elif res[0] != "PULLED":
             continue
-        url, html = res[1:]
-        with open(f"results/html{i}", "w") as fd:
-            fd.write(html)
-        log.info(f"GET {url} OK")
-        i += 1
-        with lockResults:
-            htmls.append((url, html))
-            change = True
-
-        
+       
+        msg_queue.put(res)
+        #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
+   
+  
 def connectSocketToPeers(socket, uuid, peers):
     with lockPeers:
         #peer = (address, port)
@@ -74,71 +71,127 @@ def loginToNetwork(addr, port, uuid):
         time.sleep(1)
 
 
+def downloadsWriter(queue):
+    for index, url, data in iter(queue.get, "STOP"):
+        with open(f"downloads/html{index}", "w") as fd:
+            log.info(f"{url} saved")
+            fd.write(data)
+    log.debug("All data saved")
+  
+            
+def workersVerifier(workers, toPush):
+    context = zmq.Context()
+    for idx, url, addr in iter(workers.get, "STOP"):
+        try:
+            conn_sock = context.socket(zmq.REQ)
+            conn_sock.connect(addr)
+            conn_sock.send_json(url)
+            assert conn_sock.recv_json()
+        except Exception as e:
+            log.error(f"worker at {addr} abandoned {url}")
+            toPush.put(idx)
+    log.debug("Exit verifier")      
+    
+    
 class Dispatcher:
     """
     Represents a client to the services of the Scrapper.
     """
     def __init__(self, urls, uuid, address="127.0.0.1", port=4142):
-        self.urls = set(urls)
+        self.urls = list(set(urls))
+        self.size = len(self.urls)
+        self.status = [0] * self.size
         self.uuid = uuid
         self.idToLog = str(uuid)[:10]
         self.address = address
         self.port = port
 
-        self.pool = urls
-        self.htmls = []
+        self.pending = self.size
+        self.pool = []
+        self.htmls = [None] * self.size
         self.peers = []
         log.debug(f"Dispatcher created with uuid {uuid}")
         
-    def dispach(self):
+    def dispatch(self):
         """
         Start to serve the Dispatcher.
         """
         context = zmq.Context()
         socket = context.socket(zmq.PUSH)
         socket.bind(f"tcp://{self.address}:{self.port}")
-        global change
-        #params here are thread-safe???
-        pRSubscriber = Process(target=resultSubscriber, args=(self.idToLog, len(self.urls), self.peers, self.htmls, f"{self.address}:{self.port + 1}"))
+
+        msg_queue = Queue()
+        downloadsQueue = Queue()
+        workersQueue = Queue()
+        toPushQueue = Queue()
+        args = (self.uuid, self.size, self.peers, f"{self.address}:{self.port + 1}", msg_queue)
+        pRSubscriber = Process(target=resultSubscriber, args=args)
+
         pRSubscriber.start()
+        pWriter = Process(target=downloadsWriter, args=(downloadsQueue,))
+        pWriter.start()
+        pVerifier = Process(target=workersVerifier, args=(workersQueue, toPushQueue))
+        pVerifier.start()
 
         loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.idToLog))
         loginT.start()
         #Release again when node disconnect from the network unwittingly for some reason
         lockLogin.acquire()
 
+        idx = {url:i for i, url in enumerate(self.urls)}
         while True:
             if len(self.pool) == 0:
                 #Check htmls vs urls and update pool
-                log.debug(f"Waiting for update pool of Dispatcher:{self.idToLog}")
-                with lockResults:
-                #//HACK: For now the condition for the pool to be updated is that we get a result, but this is no correct because a worker can die without finish his task.
-                    #//FIXME: change is no shared between pRSubscriber process
-                    if change:
-                        log.debug(f"Updating pool of Dispatcher:{self.idToLog}")
-                        #//FIXME: self.htmls is no shared between pRSubscriber process
-                        responsedURLs = {url for url, _ in self.htmls}
-                        self.pool = self.urls - responsedURLs
-                        change = False
-            try:
+                log.debug(f"Updating pool of Dispatcher:{self.idToLog}")
+                while True:
+                    try:
+                        #//HACK: Maybe all processing done in this try, can be done better by a thread
+                        msg, url, data = msg_queue.get(block=False)
+                        #//HACK: Maybe you don't have that urls
+                        index = idx[url]
+                        if msg == "RESULT" and self.status[index] != 2:
+                            downloadsQueue.put((index, url, data))
+                            self.status[index] = 2
+                            self.pending -= 1
+                        elif msg == "PULLED":
+                            self.status[index] = data
+                    except Empty_Queue:
+                        break
+                while True:
+                    try:
+                        index = toPushQueue.get(block=False)
+                        log.debug(f"Preparing {url} for PUSH again")
+                        self.status[index] = 0
+                    except Empty_Queue:
+                        break
+                for i, status in enumerate(self.status):
+                    if status == 0:
+                        self.pool.append(self.urls[i])
+                        self.status[i] = 1
+                    elif isinstance(status, str):
+                        workersQueue.put((i, self.urls[i], status))
+            if len(self.pool):
                 url = self.pool.pop()
                 log.debug(f"Pushing {url} from Dispatcher:{self.idToLog}")
-                socket.send_json((f"{self.address}:{self.port + 1}",url))
-            except IndexError:
-                with lockResults:
-                    #//FIXME: self.htmls is no shared between pRSubscriber process
-                    if len(self.urls) == len(self.htmls):
-                        break
-                time.sleep(5)
+                socket.send_json((f"{self.address}:{self.port + 1}", url))
+            else:
+                if self.pending == 0:
+                	break
+        
 
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully")
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system")
         #disconnect
+        downloadsQueue.put("STOP")
+        workersQueue.put("STOP")
         pRSubscriber.join()
-
+        pVerifier.join()
+        pWriter.join()
+        
 
 def main(args):
     log.setLevel(parseLevel(args.level))
+    
     uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port)
     d.dispach()
