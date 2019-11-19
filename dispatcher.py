@@ -142,7 +142,6 @@ class Dispatcher:
         while True:
             if len(self.pool) == 0:
                 #Check htmls vs urls and update pool
-                log.debug(f"Updating pool of Dispatcher:{self.idToLog}")
                 while True:
                     try:
                         #//HACK: Maybe all processing done in this try, can be done better by a thread
@@ -194,7 +193,7 @@ def main(args):
     
     uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port)
-    d.dispach()
+    d.dispatch()
     log.info(f"Dispatcher:{uuid} finish!!!")
 
 

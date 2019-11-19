@@ -165,6 +165,7 @@ class Scrapper:
                     log.debug(f"Pulled {url} in worker:{self.uuid}")
                     #//FIXME: what happend if client die
                     taskQueue.put((addr, url))
+                    #//HACK: Maybe sending this PULLED message, can be done better by a process, this way the manager can pull faster from the pool
                     socket = context.socket(zmq.REQ)
                     socket.connect(f"tcp://{addr}")
                     socket.send_json(("PULLED", url, f"tcp://{self.addr}:{self.port + 2}"))
