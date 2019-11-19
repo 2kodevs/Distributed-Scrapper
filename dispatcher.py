@@ -35,6 +35,8 @@ def resultSubscriber(uuid, sizeUrls, peers, addr, msg_queue):
         if res[0] == "RESULT":
             log.info(f"GET {res[1]} {GREEN}OK{RESET}")
             i += 1
+        elif res[0] != "PULLED":
+            continue
         msg_queue.put(res)
         #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
         
@@ -80,8 +82,7 @@ def downloadsWriter(queque):
             
 def workersVerifier(workers, toPush):
     context = zmq.Context()
-    while True:
-        idx, url, addr = workers.get()
+    for idx, url, addr in iter(workers.get, "STOP"):
         try:
             conn_sock = context.socket(zmq.REQ)
             conn_sock.connect(addr)
@@ -89,7 +90,8 @@ def workersVerifier(workers, toPush):
             assert conn_sock.recv_json()
         except Exception as e:
             log.error(f"worker at {addr} abandoned {url}")
-            toPush.put(idx)      
+            toPush.put(idx)
+    log.debug("exit verifier")      
     
     
 class Dispatcher:
@@ -180,7 +182,9 @@ class Dispatcher:
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system")
         #disconnect
         downloadsQueue.put("STOP")
+        workersQueue.put("STOP")
         pRSubscriber.join()
+        pVerifier.join()
         pWriter.join()
         
 
