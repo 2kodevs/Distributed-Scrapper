@@ -137,13 +137,13 @@ class Scrapper:
         clientPubT = Thread(target=publishClients, name="clientPubT", args=(self.addr, self.port, self.clients, clientQueue, self.uuid))
         discoverT = Thread(target=discoverClients, name="discoverT", args=(self.clients, clientQueue, self.uuid))
         connectT = Thread(target=connectToClients, name="connectT", args=(socketPull, clientQueue, self.uuid))
-        listen = Process(target=listener, args=(self.addr, self.port + 2))
+        plisten = Process(target=listener, args=(self.addr, self.port + 2))
 
         if self.seed:
             clientPubT.start()
         discoverT.start()
         connectT.start()
-        listen.start()
+        plisten.start()
         
         while len(self.clients) == 0:
             log.debug(f"Scrapper:{self.uuid} waiting for clients")
