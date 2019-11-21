@@ -4,12 +4,11 @@ from multiprocessing import Process, Lock, Queue
 from multiprocessing.queues import Empty as Empty_Queue
 from threading import Thread, Lock as tLock
 from util.colors import GREEN, RESET
-from util.utils import parseLevel, makeUuid
+from util.utils import parseLevel, makeUuid, LoggerFactory as Logger
 
 #//TODO: Find a way and a place to initialize more properly the logger for this module.
 #//TODO: It would be useful that the logger log the thread of process name to.
-logging.basicConfig(format=format, datefmt=datefmt)
-log = logging.getLogger(name="Dispatcher")
+log = Logger(name="Dispatcher")
 
 lockResults = Lock()
 lockPeers = Lock()
