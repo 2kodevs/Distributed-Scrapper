@@ -6,7 +6,8 @@ urls = [
     "http://www.juventudrebelde.cu"
 ]
 
-format  = f'{BLUEB}%(asctime)s{RESET} - {RED}%(levelname)s{RESET} - {GREEN}%(name)s{RESET} - %(message)s'
+format  = f'{BLUE}%(asctime)s{RESET} - %(color)s%(levelname)s{RESET} - {GREEN}%(name)s{RESET} - %(message)s'
+
 datefmt ='%Y-%m-%d %H:%M:%S'
 
 localhost = "127.0.0.1"

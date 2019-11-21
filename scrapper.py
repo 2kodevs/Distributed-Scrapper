@@ -4,10 +4,10 @@ from multiprocessing import Process, Lock, Queue, Value
 from ctypes import c_int
 from threading import Thread, Lock as tLock
 from util.params import format, datefmt, login
-from util.utils import parseLevel
+from util.utils import parseLevel, LoggerFactory as Logger
 
-logging.basicConfig(format=format, datefmt=datefmt)
-log = logging.getLogger(name="Scrapper")
+
+log = Logger(name="Scrapper")
 
 availableSlaves = Value(c_int)
 

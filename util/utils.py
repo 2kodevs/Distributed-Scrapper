@@ -1,4 +1,7 @@
 import socket, logging, hashlib, random, sys
+from util.colors import REDB, BLUEB, YELLOWB
+from util.params import format, datefmt
+
 
 def getIp():
     """
@@ -22,4 +25,33 @@ def makeUuid(n, urls):
     h = hashlib.sha256(name.encode() + str(nounce).encode())
     return int.from_bytes(h.digest(), byteorder=sys.byteorder)
 
-parseLevel = action=lambda x: eval(f"logging.{x}")
+parseLevel = lambda x: getattr(logging, x)
+
+def LoggerFactory(name="root"):
+    logging.setLoggerClass(Logger)
+    logging.basicConfig(format=format, datefmt=datefmt)
+    return logging.getLogger(name=name)
+    
+class Logger(logging.getLoggerClass()):
+    
+    def __init__(self, name = "root", level = logging.NOTSET):
+        self.debug_color =  BLUEB
+        self.info_color = YELLOWB
+        self.error_color = REDB
+        return super().__init__(name, level)
+        
+    def debug(self, msg):
+        super().debug(msg, extra={"color": self.debug_color})
+        
+    def info(self, msg):
+        super().info(msg, extra={"color": self.info_color})
+        
+    def error(self, msg):
+        super().error(msg, extra={"color": self.error_color})
+        
+    def change_color(self, method, color):
+        setattr(self, f"{method}_color", color)
+        
+        
+
+    
