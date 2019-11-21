@@ -40,14 +40,14 @@ class Logger(logging.getLoggerClass()):
         self.error_color = REDB
         return super().__init__(name, level)
         
-    def debug(self, msg):
-        super().debug(msg, extra={"color": self.debug_color})
+    def debug(self, msg, mth=""):
+        super().debug(msg, extra={"color": self.debug_color, "method": mth})
         
-    def info(self, msg):
-        super().info(msg, extra={"color": self.info_color})
+    def info(self, msg, mth=""):
+        super().info(msg, extra={"color": self.info_color, "method": mth})
         
-    def error(self, msg):
-        super().error(msg, extra={"color": self.error_color})
+    def error(self, msg, mth=""):
+        super().error(msg, extra={"color": self.error_color, "method": mth})
         
     def change_color(self, method, color):
         setattr(self, f"{method}_color", color)

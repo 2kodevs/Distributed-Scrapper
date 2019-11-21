@@ -6,7 +6,7 @@ urls = [
     "http://www.juventudrebelde.cu"
 ]
 
-format  = f'{BLUE}%(asctime)s{RESET} - %(color)s%(levelname)s{RESET} - {GREEN}%(name)s{RESET} - %(message)s'
+format  = f'{BLUE}%(asctime)s{RESET} - %(color)s%(levelname)s{RESET} - {BLACKB}%(name)s{RESET} - {GREEN}%(method)s{RESET} - %(message)s'
 
 datefmt ='%Y-%m-%d %H:%M:%S'
 
