@@ -32,16 +32,16 @@ def workerAttender(pulledQ, resultQ, addr):
     while True:
         try:
             msg = socket.recv_json()
-            log.info(f"Message received: {msg}", "Worker Attender")
             if msg[0] == "PULLED":
                 #msg = PULLED, url, workerAddr
-                pulledQ.put(msg[1], msg[2])
+                log.info(f"Message received: {msg}", "Worker Attender")
+                pulledQ.put((False, msg[1], msg[2]))
             elif msg[0] == "DONE":
                 #msg = DONE, url, html
-                resultQ.put(msg[1], msg[2])
+                resultQ.put((True, msg[1], msg[2]))
 
             #nothing important to send
-            msg.send(f"OK")  
+            socket.send(b"OK")  
         except Exception as e:
             #Handle connection error
             log.error(e, "Worker Attender")
@@ -54,12 +54,12 @@ def taskManager(tasks, q):
     """
     while True:
         try:
-            url, val = q.get(block=False)
+            flag, url, data = q.get(block=False)
             with lockTasks:
-                tasks[url] = val
+                tasks[url] = (flag, data)
                 #publish to other seeds
         except queue.Empty:
-            time.sleep(1)       
+            time.sleep(1)  
 
 
 class Seed:
@@ -98,9 +98,8 @@ class Seed:
         while True:
             try:
                 msg = socket.recv_json()
-                log.info(f"Message received: {msg}", "serve")
                 if msg[0] != "URL":
-                    msg.send(b"UNKNOWN")
+                    socket.send(b"UNKNOWN")
                     continue
                 url = msg[1]
                 with lockTasks:
@@ -125,7 +124,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='Client of a distibuted scrapper')
-    parser.add_argument('-p', '--port', type=int, default=4142, help='connection port')
+    parser.add_argument('-p', '--port', type=int, default=8101, help='connection port')
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
 

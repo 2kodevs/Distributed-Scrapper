@@ -1,4 +1,4 @@
-import zmq
+import zmq, time
 from util.params import urls, seeds
 from util.colors import GREEN, RESET
 from multiprocessing import Process, Queue
@@ -41,29 +41,31 @@ class Dispatcher:
 
         idx = {url: i for i, url in enumerate(self.urls)}
         while len(self.urls):
-            while True:
-                try:
-                    url = self.urls[0]
-                    addr, port = seeds[0]
-                    #//HACK: We need to create a socket every time?
-                    socket = context.socket(zmq.REQ)
-                    socket.connect(f"tcp://{addr}:{port}")
-                    socket.send_json(("URL", url))
-                    response = socket.recv_json()
-                    assert len(response) == 2, "bad response size"
-                    download, html = response
-                    self.urls.pop(0)
-                    if download:
-                        log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
-                        downloadsQueue.put((idx[url], url, html))
-                    else:
-                        self.urls.append(url)
-                        socket.close()
-                except AssertionError as e:
-                    log.error(e)
-                except Exception as e:
-                    log.error(e)
-                    seeds.append(seeds.pop(0))        
+            try:
+                url = self.urls[0]
+                addr, port = seeds[0]
+                #//HACK: We need to create a socket every time?
+                socket = context.socket(zmq.REQ)
+                socket.connect(f"tcp://{addr}:{port}")
+                log.debug(f"connected to {seeds[0]}", "dispatch")
+                socket.send_json(("URL", url))
+                log.debug(f"send {url}", "dispatch")
+                response = socket.recv_json()
+                assert len(response) == 2, "bad response size"
+                download, html = response
+                self.urls.pop(0)
+                if download:
+                    log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
+                    downloadsQueue.put((idx[url], url, html))
+                else:
+                    self.urls.append(url)
+                socket.close()
+            except AssertionError as e:
+                log.error(e, "dispatch")
+            except Exception as e:
+                log.error(e, "dispatch")
+                seeds.append(seeds.pop(0))  
+            time.sleep(1)
 
 
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully", "dispatch")

@@ -19,12 +19,13 @@ def slave(tasks, notifications, uuid, idx):
     """
     while True:
         url = tasks.get() 
-        with availableSlaves.get_lock():
+        with availableSlaves:
             availableSlaves.value -= 1
         log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}", f"slave{idx}")
+        #//TODO: Handle request connection error
         response = requests.get(url)
         notifications.put(("DONE", url, response.text))
-        with availableSlaves.get_lock():
+        with availableSlaves:
             availableSlaves.value += 1
   
         
@@ -60,13 +61,13 @@ def notifier(notifications):
             addr, port = seeds[0]
             try:
                 socket = context.socket(zmq.REQ)
-                socket.connect(f"tcp://{addr}:{port}")
+                socket.connect(f"tcp://{addr}:{port + 2}")
                 socket.send_json(msg)
-                log.debug(f"{msg[0]} {msg[1]}", "notifier")
                 # nothing important receive
                 socket.recv()
                 socket.close()
-            else:
+                break
+            except:
                 seeds.append(seeds.pop(0)) 
         
         
@@ -74,12 +75,12 @@ class Scrapper:
     """
     Represents a scrapper, the worker node in the Scrapper network.
     """
-    def __init__(self, uuid, address=localhost, port=8101):
+    def __init__(self, uuid, address, port):
         self.uuid = uuid
         self.addr = address
         self.port = port
         
-        log.debug(f"Scrapper created with uuid {uuid} --- Is Seed:{seed}", "init")
+        log.debug(f"Scrapper created with uuid {uuid}", "init")
 
     def manage(self, slaves):
         """
@@ -110,13 +111,13 @@ class Scrapper:
         addr = (self.addr, self.port)
         while True:
             #task: (client_addr, url)
-            with availableSlaves.get_lock():
+            with availableSlaves:
                 if availableSlaves.value > 0:
+                    log.debug(f"Available Slaves: {availableSlaves.value}", "manage")
                     url = socketPull.recv().decode()
                     taskQueue.put(url)
                     notificationsQueue.put(("PULLED", url, addr))
                     log.debug(f"Pulled {url} in worker:{self.uuid}", "manage")
-            time.sleep(1)  
             
         pListen.terminate()
         pNotifier.terminate()               
@@ -134,10 +135,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='Worker of a distibuted scrapper')
-    parser.add_argument('-p', '--port', type=int, default=8101, help='connection port')
+    parser.add_argument('-p', '--port', type=int, default=5050, help='connection port')
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
-    # parser.add_argument('-s', '--seed', action='store_true')
 
     args = parser.parse_args()
 
