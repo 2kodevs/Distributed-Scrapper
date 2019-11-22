@@ -45,23 +45,26 @@ class Dispatcher:
                 try:
                     url = self.urls[0]
                     addr, port = seeds[0]
+                    #//HACK: We need to create a socket every time?
                     socket = context.socket(zmq.REQ)
                     socket.connect(f"tcp://{addr}:{port}")
                     socket.send_json(("URL", url))
                     response = socket.recv_json()
                     assert len(response) == 2, "bad response size"
                     download, html = response
-                    pop(self.urls[0])
+                    self.urls.pop(0)
                     if download:
                         log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
-                        downloadsQueue.put((i, url, html))
+                        downloadsQueue.put((idx[url], url, html))
                     else:
                         self.urls.append(url)
+                        socket.close()
                 except AssertionError as e:
                     log.error(e)
                 except Exception as e:
                     log.error(e)
                     seeds.append(seeds.pop(0))        
+
 
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully", "dispatch")
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
