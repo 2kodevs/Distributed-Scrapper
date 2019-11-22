@@ -20,6 +20,7 @@ def pushTask(toPushQ, addr):
         log.debug(f"Pushing {url}", "Task Pusher")
         socket.send(url.encode())
 
+
 def workerAttender(pulledQ, resultQ, addr):
     """
     Process that listen notifications from workers.
@@ -41,10 +42,11 @@ def workerAttender(pulledQ, resultQ, addr):
 
             #nothing important to send
             msg.send(f"OK")  
-        except:
+        except Exception as e:
             #Handle connection error
-            log.error("Connection Error", "Worker Attender")
+            log.error(e, "Worker Attender")
             continue
+
             
 def taskManager(tasks, q):
     """
@@ -57,8 +59,8 @@ def taskManager(tasks, q):
                 tasks[url] = val
                 #publish to other seeds
         except queue.Empty:
-            time.sleep(1)
-            continue       
+            time.sleep(1)       
+
 
 class Seed:
     """
@@ -69,6 +71,7 @@ class Seed:
         self.port = port
         self.tasks = dict()
         log.debug(f"Seed node created with address:{address}:{port}", pMainLog)
+
 
     def serve(self):
         """
@@ -95,20 +98,21 @@ class Seed:
         while True:
             try:
                 msg = socket.recv_json()
-                log.info(f"Message received: {msg}", pMainLog)
+                log.info(f"Message received: {msg}", "serve")
                 if msg[0] != "URL":
                     msg.send(b"UNKNOWN")
                     continue
                 url = msg[1]
                 with lockTasks:
-                    res = self.tasks[url]
+                    try:
+                        res = self.tasks[url]
+                    except KeyError:
+                        res = self.tasks[url] = [False, "Pushed"]
+                        pushQ.put(url)
                 socket.send_json(res)
-            except KeyError:
-                self.tasks[url] = [False, "Pushed"]
-                pushQ.put(url)
-            except zmq.error.ZMQError:
+            except Exception as e:
                  #Handle connection error
-                log.error("Connection error", pMainLog)
+                log.error(e, "serve")
             
 
 def main(args):
