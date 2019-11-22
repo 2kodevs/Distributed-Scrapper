@@ -1,74 +1,11 @@
-import zmq, logging, json, time
-from util.params import format, datefmt, urls, seeds, login
-from multiprocessing import Process, Lock, Queue
-from multiprocessing.queues import Empty as Empty_Queue
-from threading import Thread, Lock as tLock
+import zmq
+from util.params import urls, seeds
 from util.colors import GREEN, RESET
-from util.utils import parseLevel, makeUuid
-
-#//TODO: Find a way and a place to initialize more properly the logger for this module.
-#//TODO: It would be useful that the logger log the thread of process name to.
-logging.basicConfig(format=format, datefmt=datefmt)
-log = logging.getLogger(name="Dispatcher")
-
-lockResults = Lock()
-lockPeers = Lock()
-lockLogin = tLock()
-
-def resultSubscriber(uuid, sizeUrls, peers, addr, msg_queue):
-    """
-    Child Process that get downloaded html from workers.
-    """
-    context = zmq.Context()
-    socket = context.socket(zmq.REP)
-    socket.bind(f"tcp://{addr}")
-    log.debug(f"Subscriber to results of Dispatcher:{uuid} created")
-
-    i = 0
-    #//HACK: Check if 'i' is enough for this condition to be fulfilled
-    while i < sizeUrls:
-        res = socket.recv_json()
-        #nothing important to send
-        socket.send(b"Done")
-        if res[0] == "RESULT":
-            log.info(f"GET {res[1]} {GREEN}OK{RESET}")
-            i += 1
-        elif res[0] != "PULLED":
-            continue
-       
-        msg_queue.put(res)
-        #//TODO: Check if are new peers in the network to be subscribed to. Call connectSocketToPeers with a Thread?
-   
-  
-def connectSocketToPeers(socket, uuid, peers):
-    with lockPeers:
-        #peer = (address, port)
-        log.debug(f"Subscriber of Dispatcher:{uuid} connecting to available workers")
-        for p in peers:
-            socket.connect(f"tcp://{p[0]}:{p[1]}")
+from multiprocessing import Process, Queue
+from util.utils import parseLevel, makeUuid, LoggerFactory as Logger
 
 
-def loginToNetwork(addr, port, uuid):
-    """
-    Thread that enter the network when is requested.
-    """
-    while True:
-        with lockLogin:
-            context = zmq.Context()
-            socket = context.socket(zmq.REQ)
-            log.debug(f"Dispatcher:{uuid} connecting to a seed")
-            #//HACK: Connect only to one seed per subnet. Or not?
-            for sa, sp in seeds:
-                socket.connect(f"tcp://{sa}:{sp + 1}")
-                log.debug(f"Dispatcher:{uuid} connected to seed --- {sa}:{sp + 1}")
-
-            #message: (login, client_id , client_address, client_port)
-            #//HACK: This send message to all conections of the socket or to only one?
-            log.debug(f"Dispatcher:{uuid} sending message of login to seeds")
-            socket.send_json((login, uuid, addr, port))
-            #nothing important to receive
-            socket.recv()
-        time.sleep(1)
+log = Logger(name="Dispatcher")
 
 
 def downloadsWriter(queue):
@@ -79,113 +16,60 @@ def downloadsWriter(queue):
     log.debug("All data saved")
   
             
-def workersVerifier(workers, toPush):
-    context = zmq.Context()
-    for idx, url, addr in iter(workers.get, "STOP"):
-        try:
-            conn_sock = context.socket(zmq.REQ)
-            conn_sock.connect(addr)
-            conn_sock.send_json(url)
-            assert conn_sock.recv_json()
-        except Exception as e:
-            log.error(f"worker at {addr} abandoned {url}")
-            toPush.put(idx)
-    log.debug("Exit verifier")      
-    
-    
 class Dispatcher:
     """
     Represents a client to the services of the Scrapper.
     """
     def __init__(self, urls, uuid, address="127.0.0.1", port=4142):
         self.urls = list(set(urls))
-        self.size = len(self.urls)
-        self.status = [0] * self.size
         self.uuid = uuid
         self.idToLog = str(uuid)[:10]
         self.address = address
         self.port = port
 
-        self.pending = self.size
-        self.pool = []
-        self.htmls = [None] * self.size
-        self.peers = []
-        log.debug(f"Dispatcher created with uuid {uuid}")
+        log.debug(f"Dispatcher created with uuid {uuid}", "Init")
         
     def dispatch(self):
         """
         Start to serve the Dispatcher.
         """
         context = zmq.Context()
-        socket = context.socket(zmq.PUSH)
-        socket.bind(f"tcp://{self.address}:{self.port}")
 
-        msg_queue = Queue()
         downloadsQueue = Queue()
-        workersQueue = Queue()
-        toPushQueue = Queue()
-        args = (self.uuid, self.size, self.peers, f"{self.address}:{self.port + 1}", msg_queue)
-        pRSubscriber = Process(target=resultSubscriber, args=args)
-
-        pRSubscriber.start()
         pWriter = Process(target=downloadsWriter, args=(downloadsQueue,))
         pWriter.start()
-        pVerifier = Process(target=workersVerifier, args=(workersQueue, toPushQueue))
-        pVerifier.start()
 
-        loginT = Thread(target=loginToNetwork, name="loginT", args=(self.address, self.port, self.idToLog))
-        loginT.start()
-        #Release again when node disconnect from the network unwittingly for some reason
-        lockLogin.acquire()
+        idx = {url: i for i, url in enumerate(self.urls)}
+        while len(self.urls):
+            while True:
+                try:
+                    url = self.urls[0]
+                    addr, port = seeds[0]
+                    #//HACK: We need to create a socket every time?
+                    socket = context.socket(zmq.REQ)
+                    socket.connect(f"tcp://{addr}:{port}")
+                    socket.send_json(("URL", url))
+                    response = socket.recv_json()
+                    assert len(response) == 2, "bad response size"
+                    download, html = response
+                    self.urls.pop(0)
+                    if download:
+                        log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
+                        downloadsQueue.put((idx[url], url, html))
+                    else:
+                        self.urls.append(url)
+                        socket.close()
+                except AssertionError as e:
+                    log.error(e)
+                except Exception as e:
+                    log.error(e)
+                    seeds.append(seeds.pop(0))        
 
-        idx = {url:i for i, url in enumerate(self.urls)}
-        while True:
-            if len(self.pool) == 0:
-                #Check htmls vs urls and update pool
-                while True:
-                    try:
-                        #//HACK: Maybe all processing done in this try, can be done better by a thread
-                        msg, url, data = msg_queue.get(block=False)
-                        #//HACK: Maybe you don't have that urls
-                        index = idx[url]
-                        if msg == "RESULT" and self.status[index] != 2:
-                            downloadsQueue.put((index, url, data))
-                            self.status[index] = 2
-                            self.pending -= 1
-                        elif msg == "PULLED":
-                            self.status[index] = data
-                    except Empty_Queue:
-                        break
-                while True:
-                    try:
-                        index = toPushQueue.get(block=False)
-                        log.debug(f"Preparing {url} for PUSH again")
-                        self.status[index] = 0
-                    except Empty_Queue:
-                        break
-                for i, status in enumerate(self.status):
-                    if status == 0:
-                        self.pool.append(self.urls[i])
-                        self.status[i] = 1
-                    elif isinstance(status, str):
-                        workersQueue.put((i, self.urls[i], status))
-            if len(self.pool):
-                url = self.pool.pop()
-                log.debug(f"Pushing {url} from Dispatcher:{self.idToLog}")
-                socket.send_json((f"{self.address}:{self.port + 1}", url))
-            else:
-                if self.pending == 0:
-                	break
-        
 
-        log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully")
-        log.debug(f"Dispatcher:{self.uuid} disconnecting from system")
+        log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully", "dispatch")
+        log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
         #disconnect
         downloadsQueue.put("STOP")
-        workersQueue.put("STOP")
-        pRSubscriber.join()
-        pVerifier.join()
-        pWriter.join()
         
 
 def main(args):
@@ -194,7 +78,7 @@ def main(args):
     uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port)
     d.dispatch()
-    log.info(f"Dispatcher:{uuid} finish!!!")
+    log.info(f"Dispatcher:{uuid} finish!!!", "main")
 
 
 if __name__ == "__main__":
