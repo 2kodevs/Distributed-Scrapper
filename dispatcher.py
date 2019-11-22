@@ -2,7 +2,7 @@ import zmq, time
 from util.params import urls, seeds
 from util.colors import GREEN, RESET
 from multiprocessing import Process, Queue
-from util.utils import parseLevel, makeUuid, LoggerFactory as Logger
+from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ
 
 
 log = Logger(name="Dispatcher")
@@ -29,11 +29,16 @@ class Dispatcher:
 
         log.debug(f"Dispatcher created with uuid {uuid}", "Init")
         
-    def dispatch(self):
+    def dispatch(self, queue):
         """
         Start to serve the Dispatcher.
         """
         context = zmq.Context()
+        socket = noBlockREQ(context)
+
+        for addr, port in seeds:
+            socket.connect(f"tcp://{addr}:{port}")
+            log.info(f"connected to {addr}:{port}", "dispatch")
 
         downloadsQueue = Queue()
         pWriter = Process(target=downloadsWriter, args=(downloadsQueue,))
@@ -43,11 +48,7 @@ class Dispatcher:
         while len(self.urls):
             try:
                 url = self.urls[0]
-                addr, port = seeds[0]
                 #//HACK: We need to create a socket every time?
-                socket = context.socket(zmq.REQ)
-                socket.connect(f"tcp://{addr}:{port}")
-                log.debug(f"connected to {seeds[0]}", "dispatch")
                 socket.send_json(("URL", url))
                 log.debug(f"send {url}", "dispatch")
                 response = socket.recv_json()
@@ -59,19 +60,23 @@ class Dispatcher:
                     downloadsQueue.put((idx[url], url, html))
                 else:
                     self.urls.append(url)
-                socket.close()
             except AssertionError as e:
                 log.error(e, "dispatch")
+            except zmq.error.Again as e:
+                log.debug(e, "dispatch")
             except Exception as e:
                 log.error(e, "dispatch")
                 seeds.append(seeds.pop(0))  
             time.sleep(1)
 
-
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully", "dispatch")
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
         #disconnect
+
         downloadsQueue.put("STOP")
+        pWriter.join()
+        queue.put(True)
+        
         
 
 def main(args):
@@ -79,8 +84,12 @@ def main(args):
     
     uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port)
-    d.dispatch()
+    terminateQ = Queue()
+    pDispatch = Process(target=d.dispatch, args=(terminateQ,))
+    pDispatch.start()
+    terminateQ.get()
     log.info(f"Dispatcher:{uuid} finish!!!", "main")
+    pDispatch.terminate()
 
 
 if __name__ == "__main__":
