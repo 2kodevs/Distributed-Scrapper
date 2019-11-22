@@ -1,4 +1,4 @@
-import socket, logging, hashlib, random, sys
+import socket, logging, hashlib, random, sys, zmq
 from util.colors import REDB, BLUEB, YELLOWB
 from util.params import format, datefmt
 
@@ -51,6 +51,13 @@ class Logger(logging.getLoggerClass()):
         
     def change_color(self, method, color):
         setattr(self, f"{method}_color", color)
+        
+def noBlockREQ(context, timeout=2000):
+    socket = context.socket(zmq.REQ)
+    socket.setsockopt(zmq.REQ_RELAXED, 1)
+    socket.setsockopt(zmq.REQ_CORRELATE, 1)
+    socket.setsockopt(zmq.RCVTIMEO, timeout)
+    return socket
         
         
 

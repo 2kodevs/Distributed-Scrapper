@@ -2,7 +2,7 @@ import zmq, time
 from util.params import urls, seeds
 from util.colors import GREEN, RESET
 from multiprocessing import Process, Queue
-from util.utils import parseLevel, makeUuid, LoggerFactory as Logger
+from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ
 
 
 log = Logger(name="Dispatcher")
@@ -34,10 +34,7 @@ class Dispatcher:
         Start to serve the Dispatcher.
         """
         context = zmq.Context()
-        socket = context.socket(zmq.REQ)
-        socket.setsockopt(zmq.REQ_RELAXED, 1)
-        socket.setsockopt(zmq.REQ_CORRELATE, 1)
-        socket.setsockopt(zmq.RCVTIMEO, 2000)
+        socket = noBlockREQ(context)
 
         for addr, port in seeds:
             socket.connect(f"tcp://{addr}:{port}")

@@ -3,7 +3,7 @@ from util.params import seeds, localhost
 from multiprocessing import Process, Lock, Queue, Value
 from ctypes import c_int
 from threading import Thread, Lock as tLock
-from util.utils import parseLevel, LoggerFactory as Logger
+from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ
 
 
 log = Logger(name="Scrapper")
@@ -40,10 +40,7 @@ def listener(addr, port):
     
 def notifier(notifications):
     context = zmq.Context()
-    socket = context.socket(zmq.REQ)
-    socket.setsockopt(zmq.REQ_RELAXED, 1)
-    socket.setsockopt(zmq.REQ_CORRELATE, 1)
-    socket.setsockopt(zmq.RCVTIMEO, 2000)
+    socket = noBlockREQ(context)
 
     for addr, port in seeds:
         socket.connect(f"tcp://{addr}:{port + 2}")
