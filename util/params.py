@@ -11,7 +11,7 @@ format  = f'{BLUE}%(asctime)s{RESET} - %(color)s%(levelname)s{RESET} - {BLACKB}%
 datefmt ='%Y-%m-%d %H:%M:%S'
 
 localhost = "127.0.0.1"
-seeds = [(localhost, 8101)]
+seeds = [(localhost, 8101), (localhost, 9000)]
 
 login = "DISTRIBUTED-SCRAPPER"
 

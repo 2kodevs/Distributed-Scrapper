@@ -27,17 +27,6 @@ def slave(tasks, notifications, uuid, idx):
         notifications.put(("DONE", url, response.text))
         with availableSlaves:
             availableSlaves.value += 1
-  
-        
-def connectToSeeds(socket, clientQueue, uuid):
-    for s in seeds:
-        clientQueue.put(s)
-    for addr, port in iter(clientQueue.get, "STOP"):
-        try:
-            socket.connect(f"tcp://{addr}:{port + 1}")
-            log.info(f"Scrapper:{uuid} connected to seed with address:{addr}:{port + 1})", "connectToSeeds")
-        except:
-            clientQueue.put((addr, port))
     
 
 def listener(addr, port):
@@ -51,6 +40,14 @@ def listener(addr, port):
     
 def notifier(notifications):
     context = zmq.Context()
+    socket = context.socket(zmq.REQ)
+    socket.setsockopt(zmq.REQ_RELAXED, 1)
+    socket.setsockopt(zmq.REQ_CORRELATE, 1)
+    socket.setsockopt(zmq.RCVTIMEO, 2000)
+
+    for addr, port in seeds:
+        socket.connect(f"tcp://{addr}:{port + 2}")
+
     for msg in iter(notifications.get, "STOP"):
         try:
             assert len(msg) == 3, "wrong notification"
@@ -58,17 +55,15 @@ def notifier(notifications):
             log.error(e)
             continue
         while True:
-            addr, port = seeds[0]
             try:
-                socket = context.socket(zmq.REQ)
-                socket.connect(f"tcp://{addr}:{port + 2}")
                 socket.send_json(msg)
                 # nothing important receive
                 socket.recv()
-                socket.close()
                 break
-            except:
-                seeds.append(seeds.pop(0)) 
+            except zmq.error.Again as e:
+                log.debug(e, "Worker Notifier")
+            except Exception as e:
+                leg.error(e, "Worker Notifier")
         
         
 class Scrapper:
@@ -89,9 +84,9 @@ class Scrapper:
         context = zmq.Context()
         socketPull = context.socket(zmq.PULL)
         
-        clientQueue = Queue()
-        connectT = Thread(target=connectToSeeds, name="connectT", args=(socketPull, clientQueue, self.uuid))
-        connectT.start()
+        for addr, port in seeds:
+            socketPull.connect(f"tcp://{addr}:{port + 1}")
+            log.info(f"Scrapper:{self.uuid} connected to seed with address:{addr}:{port + 1})", "manage")
         
         notificationsQueue = Queue()
         pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQueue,))
@@ -118,11 +113,10 @@ class Scrapper:
                     taskQueue.put(url)
                     notificationsQueue.put(("PULLED", url, addr))
                     log.debug(f"Pulled {url} in worker:{self.uuid}", "manage")
+            time.sleep(1)
             
         pListen.terminate()
         pNotifier.terminate()               
-        clientQueue.put("STOP")   
-        connectT.join()
 
 
 def main(args):
