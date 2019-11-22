@@ -5,8 +5,8 @@ edit: ## Open the Makefile in editor
 dispatcher: ## Run a dispatcher with default params
 	python dispatcher.py
 
-seeder: ## Run a scrapper with default params and seeder flag on
-	python scrapper.py -s
+seed: ## Run a scrapper with default params and seeder flag on
+	python seed.py
 
 worker: ## Run a scrapper with default params
 	python scrapper.py
