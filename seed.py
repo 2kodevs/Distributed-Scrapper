@@ -83,17 +83,14 @@ def taskPublisher(addr, taskQ):
             log.error(e, "Task Publisher")
 
 
-def connectToPublishers(socket, addr, port, peerQ):
+def connectToPublishers(socket, peerQ):
     """
     Thread that connect subscriber socket to seeds.
     """
-    while True:
-        pAddr, pPort = peerQ.get()
-        #//TODO: Ask for address to, now we are testing with localhost for everybody
-        if pPort != port:
-            with lockSubscriber:
-                log.debug(f"Connecting to seed {pAddr}:{pPort + 3}","Connect to Publishers")
-                socket.connect(f"tcp://{pAddr}:{pPort + 3}")
+    for addr, port in iter(peerQ.get, "STOP"):
+        with lockSubscriber:
+            log.debug(f"Connecting to seed {addr}:{port + 3}","Connect to Publishers")
+            socket.connect(f"tcp://{addr}:{port + 3}")
 
 
 def taskSubscriber(tasks, addr, port, peerQ):
@@ -104,7 +101,8 @@ def taskSubscriber(tasks, addr, port, peerQ):
     socket = context.socket(zmq.SUB)
     socket.setsockopt(zmq.SUBSCRIBE, b"TASK")
 
-    connectT = Thread(target=connectToPublishers, name="Connect to Publishers", args=(socket, addr, port, peerQ))
+    #why you dont connect manually
+    connectT = Thread(target=connectToPublishers, name="Connect to Publishers", args=(socket, peerQ))
     connectT.start()
     time.sleep(1)
 
@@ -156,10 +154,12 @@ def getRemoteTasks(seedList, tasksQ):
             socket.send_json(("GET_TASKS",))
             response = socket.recv_json()
             log.debug(f"Tasks received", "Get Remote Tasks")
-            if isinstance(response, dict):
-                tasksQ.put(response)
-                break
+            assert isinstance(response, dict), f"Bad response, expected dict received {type(response)}"
+            tasksQ.put(response)
+            break
         except zmq.error.Again as e:
+            log.debug(e, "Get Remote Tasks")
+        except AssertionError as e:
             log.debug(e, "Get Remote Tasks")
         except Exception as e:
             log.error(e, "Get Remote Tasks")
@@ -175,21 +175,6 @@ class Seed:
         self.addr = address
         self.port = port
 
-        sList = list()
-        #//TODO: Connect to seeds in a way that a new seed can be added
-        for addr, p in seeds:
-            if p != port:
-                #//TODO: Ask for address to, now we are testing with localhost for everybody
-                sList.append(f"{addr}:{p}")
-        tasksQ = Queue()
-        pGetRemoteTasks = Process(target=getRemoteTasks, name="Get Remote Tasks", args=(sList, tasksQ))
-        pGetRemoteTasks.start()
-        tasks = tasksQ.get()
-        pGetRemoteTasks.terminate()
-        if tasks is None:
-            tasks = dict()
-
-        self.tasks = tasks
         log.debug(f"Seed node created with address:{address}:{port}", pMainLog)
 
 
@@ -197,6 +182,20 @@ class Seed:
         """
         Start to attend clients.
         """
+        seedsToConnect = [s for s in seeds]
+        try:
+            seedsToConnect.remove((self.addr, self.port))
+        except ValueError:
+            log.error(f"Unknown seed at {(self.addr, self.port)}", "Serve")
+        sList = map(seedsToConnect, lambda x: f"{x[0]}:{x[1]}")
+       
+        tasksQ = Queue()
+        pGetRemoteTasks = Process(target=getRemoteTasks, name="Get Remote Tasks", args=(sList, tasksQ))
+        pGetRemoteTasks.start()
+        tasks = tasksQ.get()
+        pGetRemoteTasks.terminate()
+        self.tasks = {} if tasks is None else tasks
+        
         context = zmq.Context()
         socket = context.socket(zmq.REP)
         socket.bind(f"tcp://{self.addr}:{self.port}")
@@ -209,7 +208,7 @@ class Seed:
 
         #//HACK: When a new seed enter the system, his address and port must be inserted in seedsQ
         #//TODO: Use seeds in a way that a new seed can be added
-        for s in seeds:
+        for s in seedsToConnect:
             seedsQ.put(s)
 
         pPush = Process(target=pushTask, name="Task Pusher", args=(pushQ, f"{self.addr}:{self.port + 1}"))
