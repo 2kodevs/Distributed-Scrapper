@@ -49,7 +49,6 @@ class Dispatcher:
         while len(self.urls):
             try:
                 url = self.urls[0]
-                #//HACK: We need to create a socket every time?
                 socket.send_json(("URL", url))
                 log.debug(f"send {url}", "dispatch")
                 response = socket.recv_json()

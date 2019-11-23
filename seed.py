@@ -125,6 +125,8 @@ def purger(tasks, cycle):
     """
     Thread that purge the downloaded htmls from tasks map when a time cycle occurs.
     """
+    #To not purge posible remote tasks received
+    time.sleep(5)
     while True:
         with lockTasks:
             tmpTask = dict()
@@ -151,9 +153,9 @@ def getRemoteTasks(seedList, tasksQ):
     #//HACK: Increase this number in a factor of two of the number of seeds or more
     for _ in range(4):
         try:
-            #//TODO: Solve error receiving dict: Expecting value: line 1 column 1 (char 0), maybe send chunks of the dict is the solution
-            socket.send_json("GET_TASKS")
+            socket.send_json(("GET_TASKS",))
             response = socket.recv_json()
+            log.debug(f"Tasks received", "Get Remote Tasks")
             if isinstance(response, dict):
                 tasksQ.put(response)
                 break
@@ -217,7 +219,7 @@ class Seed:
 
         taskManager1T = Thread(target=taskManager, name="Task Manager", args=(self.tasks, pulledQ, taskToPubQ))
         taskManager2T = Thread(target=taskManager, name="Task Manager", args=(self.tasks, resultQ, taskToPubQ))
-        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 20))
+        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 30))
 
         pPush.start()
         pWorkerAttender.start()
@@ -244,6 +246,7 @@ class Seed:
                     socket.send_json(res)
                 elif msg[0] == "GET_TASKS":
                     with lockTasks:
+                        log.debug(f"GET_TASK received, sending tasks", "serve")
                         socket.send_json(self.tasks)
                 else:
                     socket.send(b"UNKNOWN")

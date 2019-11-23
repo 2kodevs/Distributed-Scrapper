@@ -22,7 +22,7 @@ def slave(tasks, notifications, uuid, idx):
         with availableSlaves:
             availableSlaves.value -= 1
         log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}", f"slave {idx}")
-        #//TODO: Handle request connection error
+        #//TODO: Handle better a request connection error, we retry it a few times?
         try:
             response = requests.get(url)
         except Exception as e:
