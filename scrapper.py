@@ -21,7 +21,7 @@ def slave(tasks, notifications, uuid, idx):
         url = tasks.get() 
         with availableSlaves:
             availableSlaves.value -= 1
-        log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}", f"slave{idx}")
+        log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}", f"slave {idx}")
         #//TODO: Handle request connection error
         response = requests.get(url)
         notifications.put(("DONE", url, response.text))
