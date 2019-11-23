@@ -2,7 +2,7 @@ import zmq, time, queue, pickle
 from multiprocessing import Process, Queue
 from threading import Thread, Lock as tLock
 from util.params import seeds
-from util.utils import parseLevel, LoggerFactory as Logger
+from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ
 
 log = Logger(name="Seed")
 pMainLog = "main"
@@ -134,6 +134,33 @@ def purger(tasks, cycle):
         log.debug("Purge finished", "Purger")
         time.sleep(cycle)
 
+
+def getRemoteTasks(seedList, tasksQ):
+    """
+    Process that ask to other seed for his tasks.
+    """
+    context = zmq.Context()
+    socket = noBlockREQ(context, timeout=1000)
+
+    for s in seedList:
+        socket.connect(f"tcp://{s}")
+
+    #//HACK: Increase this number in a factor of two of the number of seeds or more
+    for _ in range(4):
+        try:
+            socket.send_json("GET_TASKS")
+            response = socket.recv_pyobj()
+            if isinstance(response, dict):
+                tasksQ.put(response)
+                break
+        except zmq.error.Again as e:
+            log.debug(e, "Get Remote Tasks")
+        except Exception as e:
+            log.error(e, "Get Remote Tasks")
+    socket.close()
+    tasksQ.put(None)
+
+
 class Seed:
     """
     Represents a seed node, the node that receive and attend all client request.
@@ -141,7 +168,22 @@ class Seed:
     def __init__(self, address, port):
         self.addr = address
         self.port = port
-        self.tasks = dict()
+
+        sList = list()
+        #//TODO: Connect to seeds in a way that a new seed can be added
+        for addr, p in seeds:
+            if p != port:
+                #//TODO: Ask for address to, now we are testing with localhost for everybody
+                sList.append(f"{addr}:{p}")
+        tasksQ = Queue()
+        pGetRemoteTasks = Process(target=getRemoteTasks, name="Get Remote Tasks", args=(sList, tasksQ))
+        pGetRemoteTasks.start()
+        tasks = tasksQ.get()
+        pGetRemoteTasks.terminate()
+        if tasks is None:
+            tasks = dict()
+
+        self.tasks = tasks
         log.debug(f"Seed node created with address:{address}:{port}", pMainLog)
 
 
@@ -160,6 +202,7 @@ class Seed:
         seedsQ = Queue()
 
         #//HACK: When a new seed enter the system, his address and port must be inserted in seedsQ
+        #//TODO: Use seeds in a way that a new seed can be added
         for s in seeds:
             seedsQ.put(s)
 
@@ -186,17 +229,20 @@ class Seed:
         while True:
             try:
                 msg = socket.recv_json()
-                if msg[0] != "URL":
+                if msg[0] == "URL":
+                    url = msg[1]
+                    with lockTasks:
+                        try:
+                            res = self.tasks[url]
+                        except KeyError:
+                            res = self.tasks[url] = [False, "Pushed"]
+                            pushQ.put(url)
+                    socket.send_json(res)
+                elif msg[0] == "GET_TASKS":
+                    with lockTasks:
+                        socket.send_pyobj(self.tasks)
+                else:
                     socket.send(b"UNKNOWN")
-                    continue
-                url = msg[1]
-                with lockTasks:
-                    try:
-                        res = self.tasks[url]
-                    except KeyError:
-                        res = self.tasks[url] = [False, "Pushed"]
-                        pushQ.put(url)
-                socket.send_json(res)
             except Exception as e:
                  #Handle connection error
                 log.error(e, "serve")
