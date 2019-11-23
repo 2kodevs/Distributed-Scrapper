@@ -121,6 +121,19 @@ def taskSubscriber(tasks, addr, port, peerQ):
             log.error(e, "Task Subscriber")
 
 
+def purger(tasks, cycle):
+    """
+    Thread that purge the downloaded htmls from tasks map when a time cycle occurs.
+    """
+    while True:
+        with lockTasks:
+            log.debug("Starting purge", "Purger")
+            for url in tasks:
+                if tasks[url][0]:
+                    tasks.pop(url)
+        log.debug("Purge finished", "Purger")
+        time.sleep(cycle)
+
 class Seed:
     """
     Represents a seed node, the node that receive and attend all client request.
@@ -157,6 +170,7 @@ class Seed:
 
         taskManager1T = Thread(target=taskManager, name="Task Manager", args=(self.tasks, pulledQ, taskToPubQ))
         taskManager2T = Thread(target=taskManager, name="Task Manager", args=(self.tasks, resultQ, taskToPubQ))
+        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 10))
 
         pPush.start()
         pWorkerAttender.start()
@@ -165,6 +179,9 @@ class Seed:
 
         taskManager1T.start()
         taskManager2T.start()
+        purgerT.start()
+
+        time.sleep(0.5)
 
         while True:
             try:

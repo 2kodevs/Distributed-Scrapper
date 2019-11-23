@@ -36,6 +36,7 @@ class Dispatcher:
         context = zmq.Context()
         socket = noBlockREQ(context)
 
+        #//TODO: Connect to seeds in a way that a new seed can be added
         for addr, port in seeds:
             socket.connect(f"tcp://{addr}:{port}")
             log.info(f"connected to {addr}:{port}", "dispatch")
