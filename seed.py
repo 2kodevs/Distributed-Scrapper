@@ -127,10 +127,13 @@ def purger(tasks, cycle):
     """
     while True:
         with lockTasks:
+            tmpTask = dict()
+            tmpTask.update(tasks)
             log.debug("Starting purge", "Purger")
-            for url in tasks:
-                if tasks[url][0]:
+            for url in tmpTask:
+                if tmpTask[url][0]:
                     tasks.pop(url)
+        log.debug(f"Purged tasks: {tasks}", "Purger")
         log.debug("Purge finished", "Purger")
         time.sleep(cycle)
 
@@ -148,8 +151,9 @@ def getRemoteTasks(seedList, tasksQ):
     #//HACK: Increase this number in a factor of two of the number of seeds or more
     for _ in range(4):
         try:
+            #//TODO: Solve error receiving dict: Expecting value: line 1 column 1 (char 0), maybe send chunks of the dict is the solution
             socket.send_json("GET_TASKS")
-            response = socket.recv_pyobj()
+            response = socket.recv_json()
             if isinstance(response, dict):
                 tasksQ.put(response)
                 break
@@ -213,7 +217,7 @@ class Seed:
 
         taskManager1T = Thread(target=taskManager, name="Task Manager", args=(self.tasks, pulledQ, taskToPubQ))
         taskManager2T = Thread(target=taskManager, name="Task Manager", args=(self.tasks, resultQ, taskToPubQ))
-        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 10))
+        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 20))
 
         pPush.start()
         pWorkerAttender.start()
@@ -240,7 +244,7 @@ class Seed:
                     socket.send_json(res)
                 elif msg[0] == "GET_TASKS":
                     with lockTasks:
-                        socket.send_pyobj(self.tasks)
+                        socket.send_json(self.tasks)
                 else:
                     socket.send(b"UNKNOWN")
             except Exception as e:
