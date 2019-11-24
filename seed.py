@@ -187,7 +187,7 @@ class Seed:
             seedsToConnect.remove((self.addr, self.port))
         except ValueError:
             log.error(f"Unknown seed at {(self.addr, self.port)}", "Serve")
-        sList = map(seedsToConnect, lambda x: f"{x[0]}:{x[1]}")
+        sList = map(lambda x: f"{x[0]}:{x[1]}", seedsToConnect)
        
         tasksQ = Queue()
         pGetRemoteTasks = Process(target=getRemoteTasks, name="Get Remote Tasks", args=(sList, tasksQ))
