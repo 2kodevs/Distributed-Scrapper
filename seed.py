@@ -17,9 +17,9 @@ def quickVerification(address, url, t, queue):
         socket.connect(f"tcp://{addr}:{port}")
         socket.send(url.encode())
         ans = socket.recv_json()
-        log.debug(f"worker at {address} is alive", "Quick Verification")
+        log.debug(f"Worker at {address} is alive", "Quick Verification")
     except zmq.error.Again:
-        log.debug(f"worker at {address} unavailabe", "Quick Verification")
+        log.debug(f"Worker at {address} unavailable", "Quick Verification")
     except Exception as e:
         log.error(e, "Quick Verification")
     finally:
