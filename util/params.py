@@ -20,7 +20,7 @@ login = "DISTRIBUTED-SCRAPPER"
 
 List of port usage:
 
-Scrapper-Seed:
+Scrapper:
 main_port(mp): to publish NEW_CLIENT
 mp + 1:        to receive new clients
 
@@ -28,4 +28,9 @@ Dispacher:
 mp:            to push tasks
 mp + 1:        to receive results
 
+Seed:
+mp:            to attend clients
+mp + 1:        to push tasks
+mp + 2:        to attend scrappers
+mp + 3:        to publish new tasks to seeds
 """
