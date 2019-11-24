@@ -1,12 +1,30 @@
 import zmq, time, queue
 from multiprocessing import Process, Queue
 from threading import Thread, Lock as tLock
-from util.utils import parseLevel, LoggerFactory as Logger
+from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ
 
 log = Logger(name="Seed")
 pMainLog = "main"
 
 lockTasks = tLock()
+
+def quickVerification(address, url, t, queue):
+    context = zmq.Context()
+    socket = noBlockREQ(context, timeout=t)
+    ans = False
+    try:
+        addr, port = address
+        socket.connect(f"tcp://{addr}:{port}")
+        socket.send(url.encode())
+        ans = socket.recv_json()
+        log.debug(f"worker at {address} is alive", "Quick Verification")
+    except zmq.error.Again:
+        log.debug(f"worker at {address} unavailabe", "Quick Verification")
+    except Exception as e:
+        log.error(e, "Quick Verification")
+    finally:
+        queue.put(ans)
+        
 
 def pushTask(toPushQ, addr):
     """
@@ -84,6 +102,7 @@ class Seed:
         pushQ = Queue()
         pulledQ = Queue()
         resultQ = Queue()
+        verificationQ = Queue()
 
         pPush = Process(target=pushTask, name="Task Pusher", args=(pushQ, f"{self.addr}:{self.port + 1}"))
         pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, f"{self.addr}:{self.port + 2}"))
@@ -105,6 +124,13 @@ class Seed:
                 with lockTasks:
                     try:
                         res = self.tasks[url]
+                        if not res[0] and isinstance(res[1], list):
+                            pQuick = Process(target=quickVerification, args=(res[1], url, 800, verificationQ))
+                            pQuick.start()
+                            ans = verificationQ.get()
+                            pQuick.terminate()
+                            if not ans:
+                                pushQ.put(url)
                     except KeyError:
                         res = self.tasks[url] = [False, "Pushed"]
                         pushQ.put(url)
