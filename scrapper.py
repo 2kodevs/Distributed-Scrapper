@@ -13,7 +13,7 @@ availableSlaves = Value(c_int)
 lockClients = tLock()
 lockSocketPull = tLock()
 
-def slave(tasks, notifications, uuid, idx):
+def slave(tasks, notifications, idx):
     """
     Child Process of Scrapper, responsable of downloading the urls.
     """
@@ -21,14 +21,17 @@ def slave(tasks, notifications, uuid, idx):
         url = tasks.get() 
         with availableSlaves:
             availableSlaves.value -= 1
-        log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}", f"slave {idx}")
+        log.info(f"Child:{os.getpid()} of Scrapper downloading {url}", f"slave {idx}")
         #//TODO: Handle better a request connection error, we retry it a few times?
-        try:
-            response = requests.get(url)
-        except Exception as e:
-            log.error(e, f"slave {idx}")
-            continue
-        notifications.put(("DONE", url, response.text))
+        for i in range(5):
+            try:
+                response = requests.get(url)
+            except Exception as e:
+                log.error(e, f"slave {idx}")
+                if i == 4:
+                    notifications.put(("FAILED", url, i))
+                continue
+            notifications.put(("DONE", url, response.text))
         with availableSlaves:
             availableSlaves.value += 1
     
@@ -58,6 +61,7 @@ def notifier(notifications):
             continue
         while True:
             try:
+                log.debug(f"Sending msg: ({msg[0]}, {msg[1]}, data) to a seed", "Worker Notifier")
                 socket.send_json(msg)
                 # nothing important receive
                 socket.recv()
@@ -65,19 +69,18 @@ def notifier(notifications):
             except zmq.error.Again as e:
                 log.debug(e, "Worker Notifier")
             except Exception as e:
-                leg.error(e, "Worker Notifier")
+                log.error(e, "Worker Notifier")
         
         
 class Scrapper:
     """
     Represents a scrapper, the worker node in the Scrapper network.
     """
-    def __init__(self, uuid, address, port):
-        self.uuid = uuid
+    def __init__(self, address, port):
         self.addr = address
         self.port = port
         
-        log.debug(f"Scrapper created with uuid {uuid}", "init")
+        log.debug(f"Scrapper created", "init")
 
     def manage(self, slaves):
         """
@@ -89,7 +92,7 @@ class Scrapper:
         #//TODO: Connect to seeds in a way that a new seed can be added
         for addr, port in seeds:
             socketPull.connect(f"tcp://{addr}:{port + 1}")
-            log.info(f"Scrapper:{self.uuid} connected to seed with address:{addr}:{port + 1})", "manage")
+            log.info(f"Scrapper connected to seed with address:{addr}:{port + 1})", "manage")
         
         notificationsQueue = Queue()
         pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQueue,))
@@ -99,12 +102,12 @@ class Scrapper:
         pListen.start()
         
         taskQueue = Queue()
-        log.info(f"Scrapper:{self.uuid} starting child process", "manage")
+        log.info(f"Scrapper starting child process", "manage")
         availableSlaves.value = slaves
         for i in range(slaves):
-            p = Process(target=slave, args=(taskQueue, notificationsQueue, self.uuid, i))
+            p = Process(target=slave, args=(taskQueue, notificationsQueue, i))
             p.start()
-            log.debug(f"Scrapper:{self.uuid} has started a child process with pid:{p.pid}", "manage")
+            log.debug(f"Scrapper has started a child process with pid:{p.pid}", "manage")
 
         addr = (self.addr, self.port)
         while True:
@@ -115,7 +118,7 @@ class Scrapper:
                     url = socketPull.recv().decode()
                     taskQueue.put(url)
                     notificationsQueue.put(("PULLED", url, addr))
-                    log.debug(f"Pulled {url} in worker:{self.uuid}", "manage")
+                    log.debug(f"Pulled {url} in scrapper", "manage")
             time.sleep(1)
             
         pListen.terminate()
@@ -124,7 +127,7 @@ class Scrapper:
 
 def main(args):
     log.setLevel(parseLevel(args.level))
-    s = Scrapper(2, port=args.port, address=args.address)
+    s = Scrapper(port=args.port, address=args.address)
     s.manage(2)
 
             

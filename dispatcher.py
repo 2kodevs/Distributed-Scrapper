@@ -54,6 +54,7 @@ class Dispatcher:
                 response = socket.recv_json()
                 assert len(response) == 2, "bad response size"
                 download, html = response
+                log.debug(f"Received {download}", "dispatch")
                 self.urls.pop(0)
                 if download:
                     log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
