@@ -41,8 +41,8 @@ class Dispatcher:
             socket.connect(f"tcp://{addr}:{port}")
             log.info(f"connected to {addr}:{port}", "dispatch")
 
-        downloadsQueue = Queue()
-        pWriter = Process(target=downloadsWriter, args=(downloadsQueue,))
+        downloadsQ = Queue()
+        pWriter = Process(target=downloadsWriter, args=(downloadsQ,))
         pWriter.start()
 
         idx = {url: i for i, url in enumerate(self.urls)}
@@ -58,7 +58,7 @@ class Dispatcher:
                 self.urls.pop(0)
                 if download:
                     log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
-                    downloadsQueue.put((idx[url], url, html))
+                    downloadsQ.put((idx[url], url, html))
                 else:
                     self.urls.append(url)
             except AssertionError as e:
@@ -74,7 +74,7 @@ class Dispatcher:
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
         #disconnect
 
-        downloadsQueue.put("STOP")
+        downloadsQ.put("STOP")
         pWriter.join()
         queue.put(True)
         

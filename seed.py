@@ -10,6 +10,16 @@ pMainLog = "main"
 lockTasks = tLock()
 lockSubscriber = tLock()
 
+def verificator(queue, t, pushQ):
+    ansQ = Queue()
+    for address, url in iter(queue.get, "STOP"):
+        pQuick = Process(target=quickVerification, args=(address, url, t, ansQ))
+        pQuick.start()
+        ans = ansQ.get()
+        if not ans:
+            pushQ.put(url)
+            
+
 def quickVerification(address, url, t, queue):
     context = zmq.Context()
     socket = noBlockREQ(context, timeout=t)
@@ -239,6 +249,7 @@ class Seed:
         pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, failedQ, f"{self.addr}:{self.port + 2}"))
         pTaskPublisher = Process(target=taskPublisher, name="Task Publisher", args=(f"{self.addr}:{self.port + 3}", taskToPubQ))
         pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.tasks, self.addr, self.port, seedsQ))
+        pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 800, pushQ))
 
         taskManager1T = Thread(target=taskManager, name="Task Manager - PULLED", args=(self.tasks, pulledQ, taskToPubQ, True))
         taskManager2T = Thread(target=taskManager, name="Task Manager - DONE", args=(self.tasks, resultQ, taskToPubQ, True))
@@ -265,17 +276,11 @@ class Seed:
                     with lockTasks:
                         try:
                             res = self.tasks[url]
-                            if not res[0] and isinstance(res[1], list):
-                                log.debug("Starting quick verification", "serve")
-                                pQuick = Process(target=quickVerification, args=(res[1], url, 800, verificationQ))
-                                pQuick.start()
-                                ans = verificationQ.get()
-                                pQuick.terminate()
-                                if not ans:
-                                    pushQ.put(url)
-                            elif not res[0] and url == res[1]:
-                                res = self.tasks[url] = [False, "Pushed"]
-                                pushQ.put(url)
+                            if not res[0]:
+                                if isinstance(res[1], list):
+                                    verificationQ.put(res[1], url)
+                                elif url == res[1]:
+                                    raise KeyError
                         except KeyError:
                             res = self.tasks[url] = [False, "Pushed"]
                             pushQ.put(url)

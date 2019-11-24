@@ -94,18 +94,18 @@ class Scrapper:
             socketPull.connect(f"tcp://{addr}:{port + 1}")
             log.info(f"Scrapper connected to seed with address:{addr}:{port + 1})", "manage")
         
-        notificationsQueue = Queue()
-        pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQueue,))
+        notificationsQ = Queue()
+        pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQ,))
         pNotifier.start()
         
         pListen = Process(target=listener, name="pListen", args=(self.addr, self.port))
         pListen.start()
         
-        taskQueue = Queue()
+        taskQ = Queue()
         log.info(f"Scrapper starting child process", "manage")
         availableSlaves.value = slaves
         for i in range(slaves):
-            p = Process(target=slave, args=(taskQueue, notificationsQueue, i))
+            p = Process(target=slave, args=(taskQ, notificationsQ, i))
             p.start()
             log.debug(f"Scrapper has started a child process with pid:{p.pid}", "manage")
 
@@ -116,8 +116,8 @@ class Scrapper:
                 if availableSlaves.value > 0:
                     log.debug(f"Available Slaves: {availableSlaves.value}", "manage")
                     url = socketPull.recv().decode()
-                    taskQueue.put(url)
-                    notificationsQueue.put(("PULLED", url, addr))
+                    taskQ.put(url)
+                    notificationsQ.put(("PULLED", url, addr))
                     log.debug(f"Pulled {url} in scrapper", "manage")
             time.sleep(1)
             
