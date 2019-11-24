@@ -36,6 +36,7 @@ class Dispatcher:
         context = zmq.Context()
         socket = noBlockREQ(context)
 
+        #//TODO: Connect to seeds in a way that a new seed can be added
         for addr, port in seeds:
             socket.connect(f"tcp://{addr}:{port}")
             log.info(f"connected to {addr}:{port}", "dispatch")
@@ -48,7 +49,6 @@ class Dispatcher:
         while len(self.urls):
             try:
                 url = self.urls[0]
-                #//HACK: We need to create a socket every time?
                 socket.send_json(("URL", url))
                 log.debug(f"send {url}", "dispatch")
                 response = socket.recv_json()

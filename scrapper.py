@@ -21,9 +21,13 @@ def slave(tasks, notifications, uuid, idx):
         url = tasks.get() 
         with availableSlaves:
             availableSlaves.value -= 1
-        log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}", f"slave{idx}")
-        #//TODO: Handle request connection error
-        response = requests.get(url)
+        log.info(f"Child:{os.getpid()} of Scrapper:{uuid} downloading {url}", f"slave {idx}")
+        #//TODO: Handle better a request connection error, we retry it a few times?
+        try:
+            response = requests.get(url)
+        except Exception as e:
+            log.error(e, f"slave {idx}")
+            continue
         notifications.put(("DONE", url, response.text))
         with availableSlaves:
             availableSlaves.value += 1
@@ -42,6 +46,7 @@ def notifier(notifications):
     context = zmq.Context()
     socket = noBlockREQ(context)
 
+    #//TODO: Connect to seeds in a way that a new seed can be added
     for addr, port in seeds:
         socket.connect(f"tcp://{addr}:{port + 2}")
 
@@ -81,6 +86,7 @@ class Scrapper:
         context = zmq.Context()
         socketPull = context.socket(zmq.PULL)
         
+        #//TODO: Connect to seeds in a way that a new seed can be added
         for addr, port in seeds:
             socketPull.connect(f"tcp://{addr}:{port + 1}")
             log.info(f"Scrapper:{self.uuid} connected to seed with address:{addr}:{port + 1})", "manage")
