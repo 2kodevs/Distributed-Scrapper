@@ -10,6 +10,35 @@ pMainLog = "main"
 lockTasks = tLock()
 lockSubscriber = tLock()
 
+def verificator(queue, t, pushQ):
+    ansQ = Queue()
+    for address, url in iter(queue.get, "STOP"):
+        pQuick = Process(target=quickVerification, args=(address, url, t, ansQ))
+        pQuick.start()
+        ans = ansQ.get()
+        pQuick.terminate()
+        if not ans:
+            pushQ.put(url)
+            
+
+def quickVerification(address, url, t, queue):
+    context = zmq.Context()
+    socket = noBlockREQ(context, timeout=t)
+    ans = False
+    try:
+        addr, port = address
+        socket.connect(f"tcp://{addr}:{port}")
+        socket.send(url.encode())
+        ans = socket.recv_json()
+        log.debug(f"Worker at {address} is alive", "Quick Verification")
+    except zmq.error.Again:
+        log.debug(f"Worker at {address} unavailable", "Quick Verification")
+    except Exception as e:
+        log.error(e, "Quick Verification")
+    finally:
+        queue.put(ans)
+        
+
 def pushTask(toPushQ, addr):
     """
     Process that push tasks to workers and notify pulled tasks.
@@ -23,7 +52,7 @@ def pushTask(toPushQ, addr):
         socket.send(url.encode())
 
 
-def workerAttender(pulledQ, resultQ, addr):
+def workerAttender(pulledQ, resultQ, failedQ, addr):
     """
     Process that listen notifications from workers.
     """
@@ -41,6 +70,9 @@ def workerAttender(pulledQ, resultQ, addr):
             elif msg[0] == "DONE":
                 #msg = DONE, url, html
                 resultQ.put((True, msg[1], msg[2]))
+            elif msg[0] == "FAILED":
+                #msg = FAILED, url, timesAttempted
+                failedQ.put((False, msg[1], msg[1]))
 
             #nothing important to send
             socket.send(b"OK")  
@@ -50,17 +82,18 @@ def workerAttender(pulledQ, resultQ, addr):
             continue
 
             
-def taskManager(tasks, q, toPubQ):
+def taskManager(tasks, q, toPubQ, pub):
     """
     Thread that helps the seed main process to update the tasks map.
     """
     while True:
         try:
-            flag, url, data = q.get(block=False)
+            flag, url, data = q.get()
             with lockTasks:
                 tasks[url] = (flag, data)
                 #publish to other seeds
-                toPubQ.put((flag, url, data))
+                if pub:
+                    toPubQ.put((flag, url, data))
         except queue.Empty:
             time.sleep(1)  
 
@@ -133,7 +166,7 @@ def purger(tasks, cycle):
             for url in tmpTask:
                 if tmpTask[url][0]:
                     tasks.pop(url)
-        log.debug(f"Purged tasks: {tasks}", "Purger")
+        log.debug(f"Tasks after purge: {tasks}", "Purger")
         log.debug("Purge finished", "Purger")
         time.sleep(cycle)
 
@@ -205,6 +238,8 @@ class Seed:
         resultQ = Queue()
         taskToPubQ = Queue()
         seedsQ = Queue()
+        verificationQ = Queue()
+        failedQ = Queue()
 
         #//HACK: When a new seed enter the system, his address and port must be inserted in seedsQ
         #//TODO: Use seeds in a way that a new seed can be added
@@ -212,21 +247,25 @@ class Seed:
             seedsQ.put(s)
 
         pPush = Process(target=pushTask, name="Task Pusher", args=(pushQ, f"{self.addr}:{self.port + 1}"))
-        pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, f"{self.addr}:{self.port + 2}"))
+        pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, failedQ, f"{self.addr}:{self.port + 2}"))
         pTaskPublisher = Process(target=taskPublisher, name="Task Publisher", args=(f"{self.addr}:{self.port + 3}", taskToPubQ))
         pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.tasks, self.addr, self.port, seedsQ))
+        pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 800, pushQ))
 
-        taskManager1T = Thread(target=taskManager, name="Task Manager", args=(self.tasks, pulledQ, taskToPubQ))
-        taskManager2T = Thread(target=taskManager, name="Task Manager", args=(self.tasks, resultQ, taskToPubQ))
+        taskManager1T = Thread(target=taskManager, name="Task Manager - PULLED", args=(self.tasks, pulledQ, taskToPubQ, True))
+        taskManager2T = Thread(target=taskManager, name="Task Manager - DONE", args=(self.tasks, resultQ, taskToPubQ, True))
+        taskManager3T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
         purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 30))
 
         pPush.start()
         pWorkerAttender.start()
         pTaskPublisher.start()
         pTaskSubscriber.start()
+        pVerifier.start()
 
         taskManager1T.start()
         taskManager2T.start()
+        taskManager3T.start()
         purgerT.start()
 
         time.sleep(0.5)
@@ -239,6 +278,12 @@ class Seed:
                     with lockTasks:
                         try:
                             res = self.tasks[url]
+                            if not res[0]:
+                                if isinstance(res[1], list):
+                                    log.debug(f"Verificating {url} in the system...", "serve")
+                                    verificationQ.put((res[1], url))
+                                elif url == res[1]:
+                                    raise KeyError
                         except KeyError:
                             res = self.tasks[url] = [False, "Pushed"]
                             pushQ.put(url)
@@ -248,7 +293,7 @@ class Seed:
                         log.debug(f"GET_TASK received, sending tasks", "serve")
                         socket.send_json(self.tasks)
                 else:
-                    socket.send(b"UNKNOWN")
+                    socket.send(b"UNKNOWN")      
             except Exception as e:
                  #Handle connection error
                 log.error(e, "serve")
