@@ -16,6 +16,7 @@ def verificator(queue, t, pushQ):
         pQuick = Process(target=quickVerification, args=(address, url, t, ansQ))
         pQuick.start()
         ans = ansQ.get()
+        pQuick.terminate()
         if not ans:
             pushQ.put(url)
             
