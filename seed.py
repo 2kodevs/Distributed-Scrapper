@@ -166,7 +166,7 @@ def purger(tasks, cycle):
             for url in tmpTask:
                 if tmpTask[url][0]:
                     tasks.pop(url)
-        log.debug(f"Purged tasks: {tasks}", "Purger")
+        log.debug(f"Tasks after purge: {tasks}", "Purger")
         log.debug("Purge finished", "Purger")
         time.sleep(cycle)
 
@@ -261,6 +261,7 @@ class Seed:
         pWorkerAttender.start()
         pTaskPublisher.start()
         pTaskSubscriber.start()
+        pVerifier.start()
 
         taskManager1T.start()
         taskManager2T.start()
@@ -279,7 +280,8 @@ class Seed:
                             res = self.tasks[url]
                             if not res[0]:
                                 if isinstance(res[1], list):
-                                    verificationQ.put(res[1], url)
+                                    log.debug(f"Verificating {url} in the system...", "serve")
+                                    verificationQ.put((res[1], url))
                                 elif url == res[1]:
                                     raise KeyError
                         except KeyError:
