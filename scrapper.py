@@ -32,6 +32,7 @@ def slave(tasks, notifications, idx):
                     notifications.put(("FAILED", url, i))
                 continue
             notifications.put(("DONE", url, response.text))
+            break
         with availableSlaves:
             availableSlaves.value += 1
     
