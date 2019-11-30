@@ -9,6 +9,7 @@ pMainLog = "main"
 
 lockTasks = tLock()
 lockSubscriber = tLock()
+lockSeeds = tLock()
 
 def verificator(queue, t, pushQ):
     ansQ = Queue()
@@ -94,6 +95,18 @@ def taskManager(tasks, q, toPubQ, pub):
             if pub:
                 toPubQ.put((flag, url, data))
 
+def seedManager(seeds, q):
+    """
+    Thread that helps the seed main process to update the seeds list.
+    """
+    while True:
+        cmd, address = q.get()
+        with lockSeeds:
+            if cmd == "APPEND":
+                seeds.append(address)
+            elif cmd == "REMOVE":
+                #//TODO: Make pipeline for remove a seed from seeds list when a seed is detected dead
+                seeds.remove(address)
 
 def taskPublisher(addr, taskQ):
     """
@@ -107,15 +120,19 @@ def taskPublisher(addr, taskQ):
         try:
             #task: (flag, url, data)
             task = taskQ.get()
-            log.debug(f"Publish task: ({task[0]}, {task[1]})", "Task Publisher")
-            socket.send_multipart([b"TASK", pickle.dumps(task)])
+            if isinstance(task[0], bool):
+                log.debug(f"Publish task: ({task[0]}, {task[1]})", "Task Publisher")
+                socket.send_multipart([b"TASK", pickle.dumps(task)])
+            else:
+                log.debug(f"Publish seed: ({task[0]}:{task[1]})", "Task Publisher")
+                socket.send_multipart([b"NEW_SEED", pickle.dumps(task)])
         except Exception as e:
             log.error(e, "Task Publisher")
 
 
 def connectToPublishers(socket, peerQ):
     """
-    Thread that connect subscriber socket to seeds.
+    Thread that connect subscriber socket to seeds"foo
     """
     for addr, port in iter(peerQ.get, "STOP"):
         with lockSubscriber:
@@ -123,28 +140,34 @@ def connectToPublishers(socket, peerQ):
             socket.connect(f"tcp://{addr}:{port + 3}")
 
 
-def taskSubscriber(tasks, addr, port, peerQ):
+def taskSubscriber(addr, port, peerQ, taskQ, seedQ):
     """
     Process that subscribe to published tasks
     """
     context = zmq.Context()
     socket = context.socket(zmq.SUB)
     socket.setsockopt(zmq.SUBSCRIBE, b"TASK")
+    socket.setsockopt(zmq.SUBSCRIBE, b"NEW_SEED")
 
-    #why you dont connect manually
     connectT = Thread(target=connectToPublishers, name="Connect to Publishers", args=(socket, peerQ))
     connectT.start()
     time.sleep(1)
 
     while True:
         try:
-            #task: (flag, url, data)
             with lockSubscriber:
                 header, task = socket.recv_multipart()
-                flag, url, data = pickle.loads(task)
-                log.debug(f"Received Subscribed message: ({header.decode()}, {flag}, {url})", "Task Subscriber")
-                with lockTasks:
-                    tasks[url] = (flag, data)
+                log.debug(f"Received Subscribed message: ({header.decode()}, {task})", "Task Subscriber")
+                if header == "TASK":
+                    #task: (flag, url, data)
+                    flag, url, data = pickle.loads(task)
+                    taskQ.put((flag, url, data))
+                else:
+                    #task: (address, port)
+                    addr, port = pickle.loads(task)
+                    seedQ.put(("APPEND", (addr, port)))
+                    peerQ.put((addr, port))
+                    
         except Exception as e:
             log.error(e, "Task Subscriber")
 
@@ -204,6 +227,7 @@ class Seed:
     def __init__(self, address, port):
         self.addr = address
         self.port = port
+        self.seeds = [(address, port)]
 
         log.debug(f"Seed node created with address:{address}:{port}", pMainLog)
 
@@ -237,6 +261,7 @@ class Seed:
         seedsQ = Queue()
         verificationQ = Queue()
         failedQ = Queue()
+        newSeedsQ = Queue()
 
         #//HACK: When a new seed enter the system, his address and port must be inserted in seedsQ
         #//TODO: Use seeds in a way that a new seed can be added
@@ -246,12 +271,13 @@ class Seed:
         pPush = Process(target=pushTask, name="Task Pusher", args=(pushQ, f"{self.addr}:{self.port + 1}"))
         pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, failedQ, f"{self.addr}:{self.port + 2}"))
         pTaskPublisher = Process(target=taskPublisher, name="Task Publisher", args=(f"{self.addr}:{self.port + 3}", taskToPubQ))
-        pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.tasks, self.addr, self.port, seedsQ))
+        pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.addr, self.port, seedsQ, resultQ, newSeedsQ))
         pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 800, pushQ))
 
         taskManager1T = Thread(target=taskManager, name="Task Manager - PULLED", args=(self.tasks, pulledQ, taskToPubQ, True))
         taskManager2T = Thread(target=taskManager, name="Task Manager - DONE", args=(self.tasks, resultQ, taskToPubQ, True))
         taskManager3T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
+        seedManagerT = Thread(target=seedManager, name="Seed Manager", args=(self.seeds, newSeedsQ))
         purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 30))
 
         pPush.start()
@@ -263,6 +289,7 @@ class Seed:
         taskManager1T.start()
         taskManager2T.start()
         taskManager3T.start()
+        seedManagerT.start()
         purgerT.start()
 
         time.sleep(0.5)
@@ -289,6 +316,15 @@ class Seed:
                     with lockTasks:
                         log.debug(f"GET_TASK received, sending tasks", "serve")
                         socket.send_json(self.tasks)
+                elif msg[0] == "NEW_SEED":
+                    #addr = (address, port)
+                    addr = msg[1]
+                    with lockSeeds:
+                        self.seeds.append(addr)
+                    taskToPubQ.put(addr)
+                elif msg[0] == "GET_SEEDS":
+                    with lockSeeds:
+                        socket.send_json(self.seeds)
                 else:
                     socket.send(b"UNKNOWN")      
             except Exception as e:
