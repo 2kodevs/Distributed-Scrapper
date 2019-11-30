@@ -87,15 +87,12 @@ def taskManager(tasks, q, toPubQ, pub):
     Thread that helps the seed main process to update the tasks map.
     """
     while True:
-        try:
-            flag, url, data = q.get()
-            with lockTasks:
-                tasks[url] = (flag, data)
-                #publish to other seeds
-                if pub:
-                    toPubQ.put((flag, url, data))
-        except queue.Empty:
-            time.sleep(1)  
+        flag, url, data = q.get()
+        with lockTasks:
+            tasks[url] = (flag, data)
+            #publish to other seeds
+            if pub:
+                toPubQ.put((flag, url, data))
 
 
 def taskPublisher(addr, taskQ):
