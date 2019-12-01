@@ -1,8 +1,9 @@
-import zmq, time, queue, pickle
+import zmq, time, queue, pickle, re
 from multiprocessing import Process, Queue
 from threading import Thread, Lock as tLock
-from util.params import seeds
+from util.params import seeds, login
 from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ
+from socket import *
 
 log = Logger(name="Seed")
 pMainLog = "main"
@@ -10,6 +11,8 @@ pMainLog = "main"
 lockTasks = tLock()
 lockSubscriber = tLock()
 lockSeeds = tLock()
+
+broadcastPort = 4143
 
 def verificator(queue, t, pushQ):
     ansQ = Queue()
@@ -24,13 +27,13 @@ def verificator(queue, t, pushQ):
 
 def quickVerification(address, url, t, queue):
     context = zmq.Context()
-    socket = noBlockREQ(context, timeout=t)
+    sock = noBlockREQ(context, timeout=t)
     ans = False
     try:
         addr, port = address
-        socket.connect(f"tcp://{addr}:{port}")
-        socket.send(url.encode())
-        ans = socket.recv_json()
+        sock.connect(f"tcp://{addr}:{port}")
+        sock.send(url.encode())
+        ans = sock.recv_json()
         log.debug(f"Worker at {address} is alive", "Quick Verification")
     except zmq.error.Again:
         log.debug(f"Worker at {address} unavailable", "Quick Verification")
@@ -45,12 +48,12 @@ def pushTask(toPushQ, addr):
     Process that push tasks to workers and notify pulled tasks.
     """
     context = zmq.Context()
-    socket = context.socket(zmq.PUSH)
-    socket.bind(f"tcp://{addr}")
+    sock = context.socket(zmq.PUSH)
+    sock.bind(f"tcp://{addr}")
     
     for url in iter(toPushQ.get, "STOP"):
         log.debug(f"Pushing {url}", "Task Pusher")
-        socket.send(url.encode())
+        sock.send(url.encode())
 
 
 def workerAttender(pulledQ, resultQ, failedQ, addr):
@@ -58,12 +61,12 @@ def workerAttender(pulledQ, resultQ, failedQ, addr):
     Process that listen notifications from workers.
     """
     context = zmq.Context()
-    socket = context.socket(zmq.REP)
-    socket.bind(f"tcp://{addr}")
+    sock = context.socket(zmq.REP)
+    sock.bind(f"tcp://{addr}")
 
     while True:
         try:
-            msg = socket.recv_json()
+            msg = sock.recv_json()
             if msg[0] == "PULLED":
                 #msg = PULLED, url, workerAddr
                 log.info(f"Message received: {msg}", "Worker Attender")
@@ -76,7 +79,7 @@ def workerAttender(pulledQ, resultQ, failedQ, addr):
                 failedQ.put((False, msg[1], msg[1]))
 
             #nothing important to send
-            socket.send(b"OK")  
+            sock.send(b"OK")  
         except Exception as e:
             #Handle connection error
             log.error(e, "Worker Attender")
@@ -95,6 +98,7 @@ def taskManager(tasks, q, toPubQ, pub):
             if pub:
                 toPubQ.put((flag, url, data))
 
+
 def seedManager(seeds, q):
     """
     Thread that helps the seed main process to update the seeds list.
@@ -108,13 +112,14 @@ def seedManager(seeds, q):
                 #//TODO: Make pipeline for remove a seed from seeds list when a seed is detected dead
                 seeds.remove(address)
 
+
 def taskPublisher(addr, taskQ):
     """
     Process that publish tasks changes to others seed nodes.
     """
     context = zmq.Context()
-    socket = context.socket(zmq.PUB)
-    socket.bind(f"tcp://{addr}")
+    sock = context.socket(zmq.PUB)
+    sock.bind(f"tcp://{addr}")
 
     while True:
         try:
@@ -122,22 +127,22 @@ def taskPublisher(addr, taskQ):
             task = taskQ.get()
             if isinstance(task[0], bool):
                 log.debug(f"Publish task: ({task[0]}, {task[1]})", "Task Publisher")
-                socket.send_multipart([b"TASK", pickle.dumps(task)])
+                sock.send_multipart([b"TASK", pickle.dumps(task)])
             else:
                 log.debug(f"Publish seed: ({task[0]}:{task[1]})", "Task Publisher")
-                socket.send_multipart([b"NEW_SEED", pickle.dumps(task)])
+                sock.send_multipart([b"NEW_SEED", pickle.dumps(task)])
         except Exception as e:
             log.error(e, "Task Publisher")
 
 
-def connectToPublishers(socket, peerQ):
+def connectToPublishers(sock, peerQ):
     """
     Thread that connect subscriber socket to seeds"foo
     """
     for addr, port in iter(peerQ.get, "STOP"):
         with lockSubscriber:
             log.debug(f"Connecting to seed {addr}:{port + 3}","Connect to Publishers")
-            socket.connect(f"tcp://{addr}:{port + 3}")
+            sock.connect(f"tcp://{addr}:{port + 3}")
 
 
 def taskSubscriber(addr, port, peerQ, taskQ, seedQ):
@@ -145,18 +150,18 @@ def taskSubscriber(addr, port, peerQ, taskQ, seedQ):
     Process that subscribe to published tasks
     """
     context = zmq.Context()
-    socket = context.socket(zmq.SUB)
-    socket.setsockopt(zmq.SUBSCRIBE, b"TASK")
-    socket.setsockopt(zmq.SUBSCRIBE, b"NEW_SEED")
+    sock = context.socket(zmq.SUB)
+    sock.setsockopt(zmq.SUBSCRIBE, b"TASK")
+    sock.setsockopt(zmq.SUBSCRIBE, b"NEW_SEED")
 
-    connectT = Thread(target=connectToPublishers, name="Connect to Publishers", args=(socket, peerQ))
+    connectT = Thread(target=connectToPublishers, name="Connect to Publishers", args=(sock, peerQ))
     connectT.start()
     time.sleep(1)
 
     while True:
         try:
             with lockSubscriber:
-                header, task = socket.recv_multipart()
+                header, task = sock.recv_multipart()
                 log.debug(f"Received Subscribed message: ({header.decode()}, {task})", "Task Subscriber")
                 if header == "TASK":
                     #task: (flag, url, data)
@@ -191,21 +196,19 @@ def purger(tasks, cycle):
         time.sleep(cycle)
 
 
-def getRemoteTasks(seedList, tasksQ):
+def getRemoteTasks(seed, tasksQ):
     """
     Process that ask to other seed for his tasks.
     """
     context = zmq.Context()
-    socket = noBlockREQ(context, timeout=1000)
+    sock = noBlockREQ(context, timeout=1000)
 
-    for s in seedList:
-        socket.connect(f"tcp://{s}")
+    sock.connect(f"tcp://{seed}")
 
-    #//HACK: Increase this number in a factor of two of the number of seeds or more
-    for _ in range(4):
+    for _ in range(2):
         try:
-            socket.send_json(("GET_TASKS",))
-            response = socket.recv_json()
+            sock.send_json(("GET_TASKS",))
+            response = sock.recv_json()
             log.debug(f"Tasks received", "Get Remote Tasks")
             assert isinstance(response, dict), f"Bad response, expected dict received {type(response)}"
             tasksQ.put(response)
@@ -216,9 +219,27 @@ def getRemoteTasks(seedList, tasksQ):
             log.debug(e, "Get Remote Tasks")
         except Exception as e:
             log.error(e, "Get Remote Tasks")
-    socket.close()
+    sock.close()
     tasksQ.put(None)
 
+
+def broadcastListener(addr, port):
+    """
+    Process that reply broadcast messages from other peers.
+    """
+    sock = socket(AF_INET, SOCK_DGRAM)
+    sock.bind(('', port))
+
+    while True:
+        #address = (ip, port)
+        data, address = sock.recvfrom(4096)
+        data = str(data.decode('UTF-8'))
+        log.debug(f"Received {str(len(data))} bytes from {str(address)}", "Broadcast Listener")
+        log.debug(f"Data: {data}", "Broadcast Listener")
+        
+        if data == login:
+            #addr = (addr, port)
+            sock.sendto(pickle.dumps(("WELCOME", addr)), address)
 
 class Seed:
     """
@@ -227,32 +248,81 @@ class Seed:
     def __init__(self, address, port):
         self.addr = address
         self.port = port
-        self.seeds = [(address, port)]
 
         log.debug(f"Seed node created with address:{address}:{port}", pMainLog)
 
 
-    def serve(self):
+    def discoverPeer(self, times):
+        """
+        Discover a seed in the subnet by broadcast.
+        """
+        sock = socket(AF_INET, SOCK_DGRAM)
+        sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        sock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
+        sock.settimeout(2)
+
+        broadcastAddress = ('255.255.255.255', broadcastPort)
+        message = login
+        seed = ""
+
+        for i in range(times):
+            try:
+                log.info("Discovering peers", "discoverPeer")
+                sock.sendto(message.encode(), broadcastAddress)
+
+                log.debug("Waiting to receive", "discoverPeer")
+                data, server = sock.recvfrom(4096)
+                header, address = pickle.loads(data)
+                if header == 'WELCOME':
+                    log.debug(f"Received confirmation: {address}", "discoverPeer")
+                    log.info(f"Server: {str(server)}", "discoverPeer")
+                    seed = address
+                    break
+                else:
+                    log.debug("Login failed, retrying...", "discoverPeer")
+            except timeout as e:
+                log.error("Socket " + str(e), "discoverPeer")
+            except Exception as e:
+                log.error(e, "discoverPeer")
+
+        sock.close()
+        
+        if seed == "":
+            self.seeds = list()
+            return
+        
+        self.seeds = [seed]
+        #request list of seeds, and create self.seeds
+
+
+    def serve(self, seed):
         """
         Start to attend clients.
         """
-        seedsToConnect = [s for s in seeds]
-        try:
-            seedsToConnect.remove((self.addr, self.port))
-        except ValueError:
-            log.error(f"Unknown seed at {(self.addr, self.port)}", "Serve")
-        sList = map(lambda x: f"{x[0]}:{x[1]}", seedsToConnect)
-       
-        tasksQ = Queue()
-        pGetRemoteTasks = Process(target=getRemoteTasks, name="Get Remote Tasks", args=(sList, tasksQ))
-        pGetRemoteTasks.start()
-        tasks = tasksQ.get()
-        pGetRemoteTasks.terminate()
-        self.tasks = {} if tasks is None else tasks
+        tasks = None
+        if seed is not None:
+            #ip_address:port_number
+            regex = re.compile("\d{,3}\.\d{,3}\.\d{,3}\.\d{,3}:\d+")
+            try:
+                #//TODO: Login
+                assert regex.match(seed).end() == len(seed)
+                tasksQ = Queue()
+                pGetRemoteTasks = Process(target=getRemoteTasks, name="Get Remote Tasks", args=(seed, tasksQ))
+                pGetRemoteTasks.start()
+                tasks = tasksQ.get()
+                pGetRemoteTasks.terminate()
+                self.tasks = {} if tasks is None else tasks
+            except AssertionError:
+                log.error(f"Parameter seed inserted is not a valid ip_address:port_number")
+                tasks = None
+
+        if tasks is None:
+            self.tasks = {}
+            self.discoverPeer(5)
         
         context = zmq.Context()
-        socket = context.socket(zmq.REP)
-        socket.bind(f"tcp://{self.addr}:{self.port}")
+        sock = context.socket(zmq.REP)
+        sock.bind(f"tcp://{self.addr}:{self.port}")
 
         pushQ = Queue()
         pulledQ = Queue()
@@ -263,9 +333,7 @@ class Seed:
         failedQ = Queue()
         newSeedsQ = Queue()
 
-        #//HACK: When a new seed enter the system, his address and port must be inserted in seedsQ
-        #//TODO: Use seeds in a way that a new seed can be added
-        for s in seedsToConnect:
+        for s in self.seeds:
             seedsQ.put(s)
 
         pPush = Process(target=pushTask, name="Task Pusher", args=(pushQ, f"{self.addr}:{self.port + 1}"))
@@ -273,6 +341,7 @@ class Seed:
         pTaskPublisher = Process(target=taskPublisher, name="Task Publisher", args=(f"{self.addr}:{self.port + 3}", taskToPubQ))
         pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.addr, self.port, seedsQ, resultQ, newSeedsQ))
         pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 800, pushQ))
+        pListener = Process(target=broadcastListener, name="Broadcast Listener", args=((self.addr, self.port), broadcastPort))
 
         taskManager1T = Thread(target=taskManager, name="Task Manager - PULLED", args=(self.tasks, pulledQ, taskToPubQ, True))
         taskManager2T = Thread(target=taskManager, name="Task Manager - DONE", args=(self.tasks, resultQ, taskToPubQ, True))
@@ -285,6 +354,7 @@ class Seed:
         pTaskPublisher.start()
         pTaskSubscriber.start()
         pVerifier.start()
+        pListener.start()
 
         taskManager1T.start()
         taskManager2T.start()
@@ -296,7 +366,7 @@ class Seed:
 
         while True:
             try:
-                msg = socket.recv_json()
+                msg = sock.recv_json()
                 if msg[0] == "URL":
                     url = msg[1]
                     with lockTasks:
@@ -311,22 +381,23 @@ class Seed:
                         except KeyError:
                             res = self.tasks[url] = [False, "Pushed"]
                             pushQ.put(url)
-                    socket.send_json(res)
+                    sock.send_json(res)
                 elif msg[0] == "GET_TASKS":
                     with lockTasks:
                         log.debug(f"GET_TASK received, sending tasks", "serve")
-                        socket.send_json(self.tasks)
+                        sock.send_json(self.tasks)
                 elif msg[0] == "NEW_SEED":
                     #addr = (address, port)
                     addr = msg[1]
                     with lockSeeds:
                         self.seeds.append(addr)
+                    seedsQ.put(addr)
                     taskToPubQ.put(addr)
                 elif msg[0] == "GET_SEEDS":
                     with lockSeeds:
-                        socket.send_json(self.seeds)
+                        sock.send_json(self.seeds)
                 else:
-                    socket.send(b"UNKNOWN")      
+                    sock.send(b"UNKNOWN")      
             except Exception as e:
                  #Handle connection error
                 log.error(e, "serve")
@@ -335,7 +406,7 @@ class Seed:
 def main(args):
     log.setLevel(parseLevel(args.level))
     s = Seed(args.address, args.port)
-    s.serve()
+    s.serve(args.seed)
 
 
 if __name__ == "__main__":
@@ -345,6 +416,7 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--port', type=int, default=8101, help='connection port')
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
+    parser.add_argument('-s', '--seed', type=str, default=None, help='address of a existing seed node. Insert as ip_address:port_number')
 
     args = parser.parse_args()
 
