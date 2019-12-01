@@ -15,6 +15,8 @@ seeds = [(localhost, 8101), (localhost, 9000)]
 
 login = "DISTRIBUTED-SCRAPPER"
 
+BROADCAST_PORT = 4142
+
 #//TODO: Add this description to README.md
 """
 
