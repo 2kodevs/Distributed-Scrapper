@@ -1,9 +1,8 @@
-import zmq, logging, time, os, requests
-from util.params import seeds, localhost
+import zmq, logging, time, os, requests, re
 from multiprocessing import Process, Lock, Queue, Value
 from ctypes import c_int
-from threading import Thread, Lock as tLock
-from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds
+from threading import Thread, Lock as tLock,Semaphore
+from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds, findSeeds
 
 
 log = Logger(name="Scrapper")
@@ -12,7 +11,9 @@ availableSlaves = Value(c_int)
 
 lockClients = tLock()
 lockSocketPull = tLock()
-
+lockSocketNotifier = tLock()
+counterSocketPull = Semaphore()
+counterSocketNotifier = Semaphore()
 
 def slave(tasks, notifications, idx):
     """
@@ -39,6 +40,7 @@ def slave(tasks, notifications, idx):
     
 
 def listener(addr, port):
+    #//TODO: Describe this function
     socket = zmq.Context().socket(zmq.REP)
     socket.bind(f"tcp://{addr}:{port}")
     
@@ -46,14 +48,65 @@ def listener(addr, port):
         res = socket.recv()
         socket.send_json(True)
     
+
+def connectToSeeds1(sock, peerQ):
+    """
+    Thread that connect pull socket to seeds.
+    """
+    for addr, port in iter(peerQ.get, "STOP"):
+        with lockSocketPull:
+            log.debug(f"Connecting to seed {addr}:{port + 1}","Connect to Seeds1")
+            sock.connect(f"tcp://{addr}:{port + 1}")
+            counterSocketPull.release()
+            log.info(f"Scrapper connected to seed with address:{addr}:{port + 1})", "Connect to Seeds1")
+
+
+def disconnectToSeeds1(sock, peerQ):
+    """
+    Thread that disconnect pull socket of seeds.
+    """
+    for addr, port in iter(peerQ.get, "STOP"):
+        with lockSocketPull:
+            log.debug(f"Disconnecting of seed {addr}:{port + 1}","Disconnect to Seeds1")
+            sock.disconnect(f"tcp://{addr}:{port + 1}")
+            counterSocketPull.acquire()
+            log.info(f"Dispatcher disconnected of seed with address:{addr}:{port + 1})", "Disconnect to Seeds1")
+
+
+def connectToSeeds2(sock, peerQ):
+    """
+    Thread that connect REQ socket to seeds.
+    """
+    for addr, port in iter(peerQ.get, "STOP"):
+        with lockSocketNotifier:
+            log.debug(f"Connecting to seed {addr}:{port + 2}","Connect to Seeds2")
+            sock.connect(f"tcp://{addr}:{port + 2}")
+            counterSocketNotifier.release()
+            log.info(f"Scrapper connected to seed with address:{addr}:{port + 2})", "Connect to Seeds2")
     
-def notifier(notifications):
+
+def disconnectToSeeds2(sock, peerQ):
+    """
+    Thread that disconnect REQ socket of seeds.
+    """
+    for addr, port in iter(peerQ.get, "STOP"):
+        with lockSocketNotifier:
+            log.debug(f"Disconnecting of seed {addr}:{port + 2}","Disconnect to Seeds2")
+            sock.disconnect(f"tcp://{addr}:{port + 2}")
+            counterSocketNotifier.acquire()
+            log.info(f"Dispatcher disconnected of seed with address:{addr}:{port + 2})", "Disconnect to Seeds2")
+
+
+def notifier(notifications, peerQ, deadQ):
+    #//TODO: Describe this function
     context = zmq.Context()
     socket = noBlockREQ(context)
 
-    #//TODO: Connect to seeds in a way that a new seed can be added
-    for addr, port in seeds:
-        socket.connect(f"tcp://{addr}:{port + 2}")
+    connectT = Thread(target=connectToSeeds2, name="Connect to Seeds", args=(socket, peerQ))
+    connectT.start()
+
+    disconnectT = Thread(target=disconnectToSeeds2, name="Disconnect to Seeds", args=(socket, deadQ))
+    disconnectT.start()
 
     for msg in iter(notifications.get, "STOP"):
         try:
@@ -63,87 +116,17 @@ def notifier(notifications):
             continue
         while True:
             try:
-                log.debug(f"Sending msg: ({msg[0]}, {msg[1]}, data) to a seed", "Worker Notifier")
-                socket.send_json(msg)
-                # nothing important receive
-                socket.recv()
-                break
+                with counterSocketNotifier:
+                    log.debug(f"Sending msg: ({msg[0]}, {msg[1]}, data) to a seed", "Worker Notifier")
+                    socket.send_json(msg)
+                    # nothing important receive
+                    socket.recv()
+                    break
             except zmq.error.Again as e:
                 log.debug(e, "Worker Notifier")
             except Exception as e:
                 log.error(e, "Worker Notifier")
         
-        
-def connectToSeeds(sock, peerQ):
-    """
-    Thread that connect pull socket to seeds.
-    """
-    for addr, port in iter(peerQ.get, "STOP"):
-        with lockSocketPull:
-            log.debug(f"Connecting to seed {addr}:{port + 1}","Connect to Seeds")
-            sock.connect(f"tcp://{addr}:{port + 1}")
-            log.info(f"Scrapper connected to seed with address:{addr}:{port + 1})", "Connect to Seeds")
-
-
-def ping(seed, q):
-    """
-    Process that make ping to a seed.
-    """
-    context = zmq.Context()
-    socket = noBlockREQ(context, timeout=1000)
-    socket.connect(f"tcp://{seed[0]}:{seed[1]}")
-    status = True
-
-    log.debug(f"PING to {seed[0]}:{seed[1]}", "Ping")
-    try:
-        socket.send_json(("PING",))
-        msg = socket.recv_json()
-        log.debug(f"Received {msg} from {seed[0]}:{seed[1]} after ping", "Ping")
-    except zmq.error.Again as e:
-        log.debug(e, "Ping")
-        status = False
-    q.put(status)
-
-
-def findSeeds(seeds, peerQ):
-    """
-    Process that ask to a seed for his list of seeds.
-    """
-    time.sleep(15)
-    while True:
-        #random address
-        seed = (localhost, 9999)
-        for s in seeds:
-            #This process is useful to know if a seed is dead too
-            seed = s
-            pingQ = Queue()
-            pPing = Process(target=ping, name="Ping", args=(s, pingQ))
-            pPing.start()
-            status = pingQ.get()
-            pPing.terminate()
-            if status:
-                break
-        seedsQ = Queue()
-        pGetSeeds = Process(target=getSeeds, name="Get Seeds", args=(f"{seed[0]}:{seed[1]}", discoverPeer, None, False, seedsQ, log))
-        log.debug("Finding new seeds to pull from...", "Find Seeds")
-        pGetSeeds.start()
-        tmp = set(seedsQ.get())
-        pGetSeeds.terminate()
-        #If Get Seeds succeds to connect to a seed
-        if len(tmp) != 0:
-            dif = tmp - seeds
-            if not len(dif):
-                log.debug("No new seed nodes where finded", "Find Seeds")
-            else:
-                log.debug("New seed nodes where finded", "Find Seeds")
-
-            for s in tmp - seeds:
-                peerQ.put(s)
-            seeds.update(tmp)
-
-        #//TODO: Change the amount of the sleep in production
-        time.sleep(15)
-
 
 class Scrapper:
     """
@@ -195,19 +178,27 @@ class Scrapper:
         """
         context = zmq.Context()
         socketPull = context.socket(zmq.PULL)
-        
-        seedsQ = Queue()
-        for address in self.seeds:
-            seedsQ.put(address)
 
-        connectT = Thread(target=connectToSeeds, name="Connect to Seeds", args=(socketPull, seedsQ))
+        seedsQ1 = Queue()
+        seedsQ2 = Queue()
+        for address in self.seeds:
+            seedsQ1.put(address)
+            seedsQ2.put(address)
+
+        connectT = Thread(target=connectToSeeds1, name="Connect to Seeds", args=(socketPull, seedsQ1))
         connectT.start()
 
-        pFindSeeds = Process(target=findSeeds, name="Find Seeds", args=(set(self.seeds), seedsQ))
+        toDisconnectQ1 = Queue()
+        toDisconnectQ2 = Queue()
+
+        disconnectT = Thread(target=disconnectToSeeds1, name="Disconnect to Seeds", args=(socketPull, toDisconnectQ1))
+        disconnectT.start()
+
+        pFindSeeds = Process(target=findSeeds, name="Find Seeds", args=(set(self.seeds), [seedsQ1, seedsQ2], [toDisconnectQ1, toDisconnectQ2], log))
         pFindSeeds.start()
         
         notificationsQ = Queue()
-        pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQ,))
+        pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQ, seedsQ2, toDisconnectQ2))
         pNotifier.start()
         
         pListen = Process(target=listener, name="pListen", args=(self.addr, self.port))
@@ -227,7 +218,8 @@ class Scrapper:
             with availableSlaves:
                 if availableSlaves.value > 0:
                     log.debug(f"Available Slaves: {availableSlaves.value}", "manage")
-                    url = socketPull.recv().decode()
+                    with counterSocketPull:
+                        url = socketPull.recv().decode()
                     taskQ.put(url)
                     notificationsQ.put(("PULLED", url, addr))
                     log.debug(f"Pulled {url} in scrapper", "manage")
@@ -240,8 +232,7 @@ class Scrapper:
 def main(args):
     log.setLevel(parseLevel(args.level))
     s = Scrapper(port=args.port, address=args.address)
-    network = s.login(args.seed)
-    if not network:
+    if not s.login(args.seed):
         log.info("You are not connected to a network", "main") 
     s.manage(2)
 
@@ -250,8 +241,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='Worker of a distibuted scrapper')
-    parser.add_argument('-p', '--port', type=int, default=5050, help='connection port')
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
+    parser.add_argument('-p', '--port', type=int, default=5050, help='connection port')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
     parser.add_argument('-s', '--seed', type=str, default=None, help='address of a existing seed node. Insert as ip_address:port_number')
 
