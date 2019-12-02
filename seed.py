@@ -1,7 +1,7 @@
 import zmq, time, queue, pickle, re
 from multiprocessing import Process, Queue
 from threading import Thread, Lock as tLock
-from util.params import seeds, login, BROADCAST_PORT
+from util.params import login, BROADCAST_PORT
 from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds
 from socket import *
 
@@ -396,8 +396,7 @@ class Seed:
 def main(args):
     log.setLevel(parseLevel(args.level))
     s = Seed(args.address, args.port)
-    network = s.login(args.seed)
-    if not network:
+    if not s.login(args.seed):
         log.info("You are not connected to a network", "main") 
     s.serve(args.broadcast_port)
 
