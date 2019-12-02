@@ -173,12 +173,14 @@ class Dispatcher:
 def main(args):
     log.setLevel(parseLevel(args.level))
     
-    uuid = makeUuid(2**55, urls)
     urls = []
     if os.path.exists(args.urls):
-        url = json.load(args.urls)
+        with open(args.urls, 'r') as fd:
+            urls = json.load(fd)
     else:
         log.info("No URLs to request", 'main')
+    log.error(urls, args.urls)
+    uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port, args.depth)
     terminateQ = Queue()
     pDispatch = Process(target=d.dispatch, args=(terminateQ,))
