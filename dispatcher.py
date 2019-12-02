@@ -174,7 +174,7 @@ def main(args):
     log.setLevel(parseLevel(args.level))
     
     uuid = makeUuid(2**55, urls)
-    d = Dispatcher(urls, uuid, args.address, args.port)
+    d = Dispatcher(urls, uuid, args.address, args.port, args.depth)
     terminateQ = Queue()
     pDispatch = Process(target=d.dispatch, args=(terminateQ,))
     pDispatch.start()
@@ -190,6 +190,7 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--port', type=int, default=4142, help='connection port')
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
+    parser.add_argument('-d', '--depth', type=int, default=1, help='log level')
 
     #//TODO: use another arg to set the path to a file that contains the set of urls
 
