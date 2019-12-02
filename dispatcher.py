@@ -1,8 +1,11 @@
-import zmq, time
+from bs4 import BeautifulSoup
 from util.params import urls, seeds
 from util.colors import GREEN, RESET
+from scrapy.http import HtmlResponse
+import zmq, time, os, mimetypes, pickle
+from urllib.parse import urljoin, urlparse
 from multiprocessing import Process, Queue
-from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ
+from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, valid_tags
 
 
 log = Logger(name="Dispatcher")
@@ -14,14 +17,31 @@ def downloadsWriter(queue):
             log.info(f"{url} saved")
             fd.write(data)
     log.debug("All data saved")
-  
+    
+    
+def writer(root, url, depth, old, data, name, graph):
+    if url in old:
+        return
+    old.add(url)
+    
+    url_name = name[url]
+    with open(f'{root}/{url_name}', 'wb') as fd:
+        fd.write(data[url])
+        
+    if depth > 1:
+        for next_url in graph[url]:
+            writer(root, next_url, depth - 1, old, data, name, graph)
+
             
 class Dispatcher:
     """
     Represents a client to the services of the Scrapper.
     """
-    def __init__(self, urls, uuid, address="127.0.0.1", port=4142):
-        self.urls = list(set(urls))
+    def __init__(self, urls, uuid, address="127.0.0.1", port=4142, depth=1):
+        self.depth = depth
+        self.originals = set(urls)
+        self.urls = list(self.originals)
+        self.old = {url for url in self.originals}
         self.uuid = uuid
         self.idToLog = str(uuid)[:10]
         self.address = address
@@ -45,31 +65,101 @@ class Dispatcher:
         pWriter = Process(target=downloadsWriter, args=(downloadsQ,))
         pWriter.start()
 
-        idx = {url: i for i, url in enumerate(self.urls)}
-        while len(self.urls):
+        graph = {}
+        depth = 1
+        data = {}
+        url_mapper = {url:f"url_{i}" for i, url in enumerate(self.urls)}
+        while True:
+            # idx = {url: i for i, url in enumerate(self.urls)}
+            new_data = {}
+            while len(self.urls):
+                try:
+                    url = self.urls[0]
+                    socket.send_json(("URL", url))
+                    log.debug(f"send {url}", "dispatch")
+                    response = pickle.loads(socket.recv())
+                    assert len(response) == 2, "bad response size"
+                    download, html = response
+                    log.debug(f"Received {download}", "dispatch")
+                    self.urls.pop(0)
+                    if download:
+                        log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
+                        #downloadsQ.put((idx[url], url, html))
+                        new_data[url] = html
+                    else:
+                        self.urls.append(url)
+                except AssertionError as e:
+                    log.error(e, "dispatch")
+                except zmq.error.Again as e:
+                    log.debug(e, "dispatch")
+                except Exception as e:
+                    log.error(e, "dispatch")
+                    seeds.append(seeds.pop(0))  
+                time.sleep(1)
+                
+            log.info(f'Depth {depth} done', 'dispatch')
+            
+            for url, (html, content) in new_data.items():
+                graph[url] = set()
+                try:
+                    if ';' in content:
+                        content = content[:content.index(';')]
+                    if '.html' in mimetypes.guess_all_extensions(content):
+                        soup = BeautifulSoup(html, 'html.parser')
+                        tags = soup.find_all(valid_tags)
+                        new_urls = [(tag['href'] if tag.has_attr('href') else tag['src']) for tag in tags]
+                        full_urls = [urljoin(url, other) for other in new_urls]
+                        for i, url_dir in enumerate(full_urls):
+                            if url_dir not in url_mapper:
+                                url_mapper[url_dir] = f'url_{len(url_mapper)}'
+                            if tags[i].has_attr('href'):
+                                tags[i]['href'] = url_mapper[url_dir]
+                            else:
+                                tags[i]['src'] = url_mapper[url_dir]
+                        graph[url].update(full_urls)
+                        self.urls.extend(full_urls)
+                        html = soup.html.encode()
+                except:
+                    pass
+                new_data[url] = html
+            data.update(new_data)
+            self.urls = set(self.urls)
+            self.urls.difference_update(self.old)
+            self.old.update(self.urls)
+            self.urls = list(self.urls)
+            log.error(len(self.urls))
+            
+            if depth == self.depth:
+                break
+            depth += 1
+            
+        
+        log.info(f"Starting to write data", "dispatch")
+        for i, url in enumerate(self.originals):
             try:
-                url = self.urls[0]
-                socket.send_json(("URL", url))
-                log.debug(f"send {url}", "dispatch")
-                response = socket.recv_json()
-                assert len(response) == 2, "bad response size"
-                download, html = response
-                log.debug(f"Received {download}", "dispatch")
-                self.urls.pop(0)
-                if download:
-                    log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
-                    downloadsQ.put((idx[url], url, html))
-                else:
-                    self.urls.append(url)
-            except AssertionError as e:
-                log.error(e, "dispatch")
-            except zmq.error.Again as e:
-                log.debug(e, "dispatch")
-            except Exception as e:
-                log.error(e, "dispatch")
-                seeds.append(seeds.pop(0))  
-            time.sleep(1)
-
+                res = HtmlResponse(url=url, body=data[url], encoding='utf8')
+                base = res.css('title::text')[0].get()
+            except:
+                base = f"web_page_{i}"
+            try:
+                os.makedirs(f'downloads/{base}-data')
+            except:
+                pass
+            writer(f'downloads/{base}-data', url, self.depth, set(), data, url_mapper, graph)   
+            
+            html = data[url]
+            if len(graph[url]) > 0:
+                soup = BeautifulSoup(html, 'html.parser')
+                tags = soup.find_all(valid_tags)
+                for tag in tags:
+                    if tag.has_attr('href'):
+                        tag['href'] = f'{base}-data/{tag["href"]}'
+                    else:
+                        tag['src'] = f'{base}-data/{tag["src"]}'
+                html = soup.html.encode()
+            with open(f'downloads/{base}', 'wb') as fd:
+                fd.write(html)
+            
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully", "dispatch")
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
         #disconnect
