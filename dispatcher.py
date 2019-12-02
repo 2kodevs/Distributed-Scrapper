@@ -161,14 +161,20 @@ def main(args):
     
     uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port)
-    if not d.login(args.seed):
-        return
-    terminateQ = Queue()
-    pDispatch = Process(target=d.dispatch, args=(terminateQ,))
-    pDispatch.start()
-    terminateQ.get()
-    log.info(f"Dispatcher:{uuid} finish!!!", "main")
-    pDispatch.terminate()
+    seed = args.seed
+    while not d.login(seed):
+        log.info("Enter an address of an existing seed node. Insert as ip_address:port_number. Press ENTER if you want to omit this address. Press q if you want to exit the program")
+        seed = input("-->")
+        seed = seed.split()[0]
+        if seed == 'q':
+            break
+    if seed != 'q':
+        terminateQ = Queue()
+        pDispatch = Process(target=d.dispatch, args=(terminateQ,))
+        pDispatch.start()
+        terminateQ.get()
+        log.info(f"Dispatcher:{uuid} finish!!!", "main")
+        pDispatch.terminate()
 
 
 if __name__ == "__main__":
@@ -178,7 +184,7 @@ if __name__ == "__main__":
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
     parser.add_argument('-p', '--port', type=int, default=4142, help='connection port')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
-    parser.add_argument('-s', '--seed', type=str, default=None, help='address of a existing seed node. Insert as ip_address:port_number')
+    parser.add_argument('-s', '--seed', type=str, default=None, help='address of an existing seed node. Insert as ip_address:port_number')
 
 
     #//TODO: use another arg to set the path to a file that contains the set of urls
