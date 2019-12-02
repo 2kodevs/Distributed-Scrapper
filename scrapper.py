@@ -61,16 +61,16 @@ def connectToSeeds1(sock, peerQ):
             log.info(f"Scrapper connected to seed with address:{addr}:{port + 1})", "Connect to Seeds1")
 
 
-def disconnectToSeeds1(sock, peerQ):
+def disconnectFromSeeds1(sock, peerQ):
     """
-    Thread that disconnect pull socket of seeds.
+    Thread that disconnect pull socket from seeds.
     """
     for addr, port in iter(peerQ.get, "STOP"):
         with lockSocketPull:
-            log.debug(f"Disconnecting of seed {addr}:{port + 1}","Disconnect to Seeds1")
+            log.debug(f"Disconnecting of seed {addr}:{port + 1}","Disconnect from Seeds1")
             sock.disconnect(f"tcp://{addr}:{port + 1}")
             counterSocketPull.acquire()
-            log.info(f"Dispatcher disconnected of seed with address:{addr}:{port + 1})", "Disconnect to Seeds1")
+            log.info(f"Dispatcher disconnected of seed with address:{addr}:{port + 1})", "Disconnect from Seeds1")
 
 
 def connectToSeeds2(sock, peerQ):
@@ -85,16 +85,16 @@ def connectToSeeds2(sock, peerQ):
             log.info(f"Scrapper connected to seed with address:{addr}:{port + 2})", "Connect to Seeds2")
     
 
-def disconnectToSeeds2(sock, peerQ):
+def disconnectFromSeeds2(sock, peerQ):
     """
-    Thread that disconnect REQ socket of seeds.
+    Thread that disconnect REQ socket from seeds.
     """
     for addr, port in iter(peerQ.get, "STOP"):
         with lockSocketNotifier:
-            log.debug(f"Disconnecting of seed {addr}:{port + 2}","Disconnect to Seeds2")
+            log.debug(f"Disconnecting of seed {addr}:{port + 2}","Disconnect from Seeds2")
             sock.disconnect(f"tcp://{addr}:{port + 2}")
             counterSocketNotifier.acquire()
-            log.info(f"Dispatcher disconnected of seed with address:{addr}:{port + 2})", "Disconnect to Seeds2")
+            log.info(f"Dispatcher disconnected of seed with address:{addr}:{port + 2})", "Disconnect from Seeds2")
 
 
 def notifier(notifications, peerQ, deadQ):
@@ -105,7 +105,7 @@ def notifier(notifications, peerQ, deadQ):
     connectT = Thread(target=connectToSeeds2, name="Connect to Seeds", args=(socket, peerQ))
     connectT.start()
 
-    disconnectT = Thread(target=disconnectToSeeds2, name="Disconnect to Seeds", args=(socket, deadQ))
+    disconnectT = Thread(target=disconnectFromSeeds2, name="Disconnect from Seeds", args=(socket, deadQ))
     disconnectT.start()
 
     for msg in iter(notifications.get, "STOP"):
@@ -191,7 +191,7 @@ class Scrapper:
         toDisconnectQ1 = Queue()
         toDisconnectQ2 = Queue()
 
-        disconnectT = Thread(target=disconnectToSeeds1, name="Disconnect to Seeds", args=(socketPull, toDisconnectQ1))
+        disconnectT = Thread(target=disconnectFromSeeds1, name="Disconnect from Seeds", args=(socketPull, toDisconnectQ1))
         disconnectT.start()
 
         pFindSeeds = Process(target=findSeeds, name="Find Seeds", args=(set(self.seeds), [seedsQ1, seedsQ2], [toDisconnectQ1, toDisconnectQ2], log))
