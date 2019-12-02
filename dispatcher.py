@@ -1,10 +1,10 @@
 from bs4 import BeautifulSoup
-from util.params import urls, seeds
+from util.params import seeds
 from util.colors import GREEN, RESET
 from scrapy.http import HtmlResponse
-import zmq, time, os, mimetypes, pickle
 from urllib.parse import urljoin, urlparse
 from multiprocessing import Process, Queue
+import zmq, time, os, mimetypes, pickle, json
 from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, valid_tags
 
 
@@ -174,6 +174,11 @@ def main(args):
     log.setLevel(parseLevel(args.level))
     
     uuid = makeUuid(2**55, urls)
+    urls = []
+    if os.path.exists(args.urls):
+        url = json.load(args.urls)
+    else:
+        log.info("No URLs to request", 'main')
     d = Dispatcher(urls, uuid, args.address, args.port, args.depth)
     terminateQ = Queue()
     pDispatch = Process(target=d.dispatch, args=(terminateQ,))
@@ -191,6 +196,7 @@ if __name__ == "__main__":
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
     parser.add_argument('-d', '--depth', type=int, default=1, help='log level')
+    parser.add_argument('-u', '--urls', type=str, default='urls', help='log level')
 
     #//TODO: use another arg to set the path to a file that contains the set of urls
 

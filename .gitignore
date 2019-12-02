@@ -2,3 +2,5 @@
 __pycache__
 
 downloads/
+local_data/
+urls
