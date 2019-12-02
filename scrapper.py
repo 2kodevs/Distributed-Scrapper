@@ -1,4 +1,4 @@
-import zmq, logging, time, os, requests
+import zmq, logging, time, os, requests, pickle
 from util.params import seeds, localhost
 from multiprocessing import Process, Lock, Queue, Value
 from ctypes import c_int
@@ -31,7 +31,7 @@ def slave(tasks, notifications, idx):
                 if i == 4:
                     notifications.put(("FAILED", url, i))
                 continue
-            notifications.put(("DONE", url, response.text))
+            notifications.put(("DONE", url, (response.content, response.headers['content-type'] if 'contet-type' in response.headers else "text/html")))
             break
         with availableSlaves:
             availableSlaves.value += 1
@@ -63,7 +63,7 @@ def notifier(notifications):
         while True:
             try:
                 log.debug(f"Sending msg: ({msg[0]}, {msg[1]}, data) to a seed", "Worker Notifier")
-                socket.send_json(msg)
+                socket.send(pickle.dumps(msg))
                 # nothing important receive
                 socket.recv()
                 break

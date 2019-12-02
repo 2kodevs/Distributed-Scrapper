@@ -62,7 +62,7 @@ def workerAttender(pulledQ, resultQ, failedQ, addr):
 
     while True:
         try:
-            msg = socket.recv_json()
+            msg = pickle.loads(socket.recv())
             if msg[0] == "PULLED":
                 #msg = PULLED, url, workerAddr
                 log.info(f"Message received: {msg}", "Worker Attender")
@@ -216,6 +216,7 @@ class Seed:
         Start to attend clients.
         """
         seedsToConnect = [s for s in seeds]
+        seedsToConnect.append(("127.0.0.1", 9000))
         try:
             seedsToConnect.remove((self.addr, self.port))
         except ValueError:
@@ -255,7 +256,7 @@ class Seed:
         taskManager1T = Thread(target=taskManager, name="Task Manager - PULLED", args=(self.tasks, pulledQ, taskToPubQ, True))
         taskManager2T = Thread(target=taskManager, name="Task Manager - DONE", args=(self.tasks, resultQ, taskToPubQ, True))
         taskManager3T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
-        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 30))
+        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 60 * 15))
 
         pPush.start()
         pWorkerAttender.start()
@@ -266,7 +267,7 @@ class Seed:
         taskManager1T.start()
         taskManager2T.start()
         taskManager3T.start()
-        purgerT.start()
+        # purgerT.start()
 
         time.sleep(0.5)
 
@@ -287,7 +288,7 @@ class Seed:
                         except KeyError:
                             res = self.tasks[url] = [False, "Pushed"]
                             pushQ.put(url)
-                    socket.send_json(res)
+                    socket.send(pickle.dumps(res))
                 elif msg[0] == "GET_TASKS":
                     with lockTasks:
                         log.debug(f"GET_TASK received, sending tasks", "serve")
