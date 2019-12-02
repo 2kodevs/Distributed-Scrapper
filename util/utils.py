@@ -1,8 +1,8 @@
 import socket, logging, hashlib, random, sys, zmq, time, pickle
 from util.colors import REDB, BLUEB, YELLOWB
-from util.params import format, datefmt, BROADCAST_PORT, login
+from util.params import format, datefmt, BROADCAST_PORT, login, localhost
 from socket import *
-from multiprocessing import Queue
+from multiprocessing import Process, Queue
 
 
 def getIp():
@@ -141,3 +141,69 @@ def getSeeds(seed, discoverPeer, address, login, q, log):
             if i == 1:
                 q.put({})
                 
+
+def ping(seed, q, time, log):
+    """
+    Process that make ping to a seed.
+    """
+    context = zmq.Context()
+    socket = noBlockREQ(context, timeout=time)
+    socket.connect(f"tcp://{seed[0]}:{seed[1]}")
+    status = True
+
+    log.debug(f"PING to {seed[0]}:{seed[1]}", "Ping")
+    try:
+        socket.send_json(("PING",))
+        msg = socket.recv_json()
+        log.debug(f"Received {msg} from {seed[0]}:{seed[1]} after ping", "Ping")
+    except zmq.error.Again as e:
+        log.debug(e, "Ping")
+        status = False
+    q.put(status)
+
+
+def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15):
+    """
+    Process that ask to a seed for his list of seeds.
+    """
+    time.sleep(sleepTime)
+    while True:
+        #random address
+        seed = (localhost, 9999)
+        #to access seeds in a random mode every iteration
+        data = list(seeds)
+        random.shuffle(data)
+        for s in data:
+            #This process is useful to know if a seed is dead too
+            seed = s
+            pingQ = Queue()
+            pPing = Process(target=ping, name="Ping", args=(s, pingQ, timeout, log))
+            pPing.start()
+            status = pingQ.get()
+            pPing.terminate()
+            if status:
+                break
+            for q in deadQs:
+                q.put(s)               
+            seeds.remove(s)
+        seedsQ = Queue()
+        pGetSeeds = Process(target=getSeeds, name="Get Seeds", args=(f"{seed[0]}:{seed[1]}", discoverPeer, None, False, seedsQ, log))
+        log.debug("Finding new seeds to pull from...", "Find Seeds")
+        pGetSeeds.start()
+        tmp = set(seedsQ.get())
+        pGetSeeds.terminate()
+        #If Get Seeds succeds to connect to a seed
+        if len(tmp) != 0:
+            dif = tmp - seeds
+            if not len(dif):
+                log.debug("No new seed nodes where finded", "Find Seeds")
+            else:
+                log.debug("New seed nodes where finded", "Find Seeds")
+
+            for s in tmp - seeds:
+                for q in peerQs:
+                    q.put(s)
+            seeds.update(tmp)
+
+        #//TODO: Change the amount of the sleep in production
+        time.sleep(sleepTime)
