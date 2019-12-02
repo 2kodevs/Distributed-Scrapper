@@ -31,6 +31,7 @@ def quickVerification(address, url, t, queue):
     try:
         addr, port = address
         sock.connect(f"tcp://{addr}:{port}")
+        log.debug(f"Sending quick verification to {addr}:{port}", "Quick Verification")
         sock.send(url.encode())
         ans = sock.recv_json()
         log.debug(f"Worker at {address} is alive", "Quick Verification")
@@ -361,8 +362,12 @@ class Seed:
                                     verificationQ.put((res[1], url))
                                 elif url == res[1]:
                                     raise KeyError
+                                else:
+                                    self.tasks[url][1] += 1
+                                    if self.tasks[url][1] == 10:
+                                        raise KeyError       
                         except KeyError:
-                            res = self.tasks[url] = [False, "Pushed"]
+                            res = self.tasks[url] = [False, 0]
                             pushQ.put(url)
                     sock.send_json(res)
                 elif msg[0] == "GET_TASKS":
