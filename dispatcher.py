@@ -9,7 +9,7 @@ from threading import Thread, Lock as tLock, Semaphore
 log = Logger(name="Dispatcher")
 
 lockSocketReq = tLock()
-counterSocketReq = Semaphore()
+counterSocketReq = Semaphore(value=0)
 
 
 def downloadsWriter(queue):
@@ -129,12 +129,13 @@ class Dispatcher:
                     response = socket.recv_json()
                 assert len(response) == 2, "bad response size"
                 download, html = response
-                log.debug(f"Received {download}", "dispatch")
                 self.urls.pop(0)
                 if download:
+                    log.debug(f"Received {download}", "dispatch")
                     log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
                     downloadsQ.put((idx[url], url, html))
                 else:
+                    log.debug(f"Received {download, html}", "dispatch")
                     self.urls.append(url)
             except AssertionError as e:
                 log.error(e, "dispatch")

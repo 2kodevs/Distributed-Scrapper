@@ -12,8 +12,8 @@ availableSlaves = Value(c_int)
 lockClients = tLock()
 lockSocketPull = tLock()
 lockSocketNotifier = tLock()
-counterSocketPull = Semaphore()
-counterSocketNotifier = Semaphore()
+counterSocketPull = Semaphore(value=0)
+counterSocketNotifier = Semaphore(value=0)
 
 def slave(tasks, notifications, idx):
     """
@@ -67,10 +67,10 @@ def disconnectFromSeeds1(sock, peerQ):
     """
     for addr, port in iter(peerQ.get, "STOP"):
         with lockSocketPull:
-            log.debug(f"Disconnecting of seed {addr}:{port + 1}","Disconnect from Seeds1")
+            log.debug(f"Disconnecting from seed {addr}:{port + 1}","Disconnect from Seeds1")
             sock.disconnect(f"tcp://{addr}:{port + 1}")
             counterSocketPull.acquire()
-            log.info(f"Dispatcher disconnected of seed with address:{addr}:{port + 1})", "Disconnect from Seeds1")
+            log.info(f"Dispatcher disconnected from seed with address:{addr}:{port + 1})", "Disconnect from Seeds1")
 
 
 def connectToSeeds2(sock, peerQ):
@@ -91,10 +91,10 @@ def disconnectFromSeeds2(sock, peerQ):
     """
     for addr, port in iter(peerQ.get, "STOP"):
         with lockSocketNotifier:
-            log.debug(f"Disconnecting of seed {addr}:{port + 2}","Disconnect from Seeds2")
+            log.debug(f"Disconnecting from seed {addr}:{port + 2}","Disconnect from Seeds2")
             sock.disconnect(f"tcp://{addr}:{port + 2}")
             counterSocketNotifier.acquire()
-            log.info(f"Dispatcher disconnected of seed with address:{addr}:{port + 2})", "Disconnect from Seeds2")
+            log.info(f"Dispatcher disconnected from seed with address:{addr}:{port + 2})", "Disconnect from Seeds2")
 
 
 def notifier(notifications, peerQ, deadQ):
@@ -116,16 +116,23 @@ def notifier(notifications, peerQ, deadQ):
             continue
         while True:
             try:
-                with counterSocketNotifier:
-                    log.debug(f"Sending msg: ({msg[0]}, {msg[1]}, data) to a seed", "Worker Notifier")
-                    socket.send_json(msg)
-                    # nothing important receive
-                    socket.recv()
-                    break
+                with lockSocketNotifier:
+                    if counterSocketNotifier.acquire(timeout=1):
+                        log.debug(f"Sending msg: ({msg[0]}, {msg[1]}, data) to a seed", "Worker Notifier")
+                        socket.send_json(msg)
+                        # nothing important receive
+                        socket.recv()
+                        counterSocketNotifier.release()
+                        break
             except zmq.error.Again as e:
                 log.debug(e, "Worker Notifier")
+                counterSocketNotifier.release()
             except Exception as e:
                 log.error(e, "Worker Notifier")
+                counterSocketNotifier.release()
+            finally:
+                time.sleep(0.5)
+
         
 
 class Scrapper:
@@ -213,16 +220,21 @@ class Scrapper:
             log.debug(f"Scrapper has started a child process with pid:{p.pid}", "manage")
 
         addr = (self.addr, self.port)
+        time.sleep(1)
         while True:
             #task: (client_addr, url)
-            with availableSlaves:
-                if availableSlaves.value > 0:
-                    log.debug(f"Available Slaves: {availableSlaves.value}", "manage")
-                    with counterSocketPull:
-                        url = socketPull.recv().decode()
-                    taskQ.put(url)
-                    notificationsQ.put(("PULLED", url, addr))
-                    log.debug(f"Pulled {url} in scrapper", "manage")
+            try:
+                with availableSlaves:
+                    if availableSlaves.value > 0:
+                        log.debug(f"Available Slaves: {availableSlaves.value}", "manage")
+                        with counterSocketPull:
+                            with lockSocketPull:
+                                url = socketPull.recv(flags=zmq.NOBLOCK).decode()
+                        taskQ.put(url)
+                        notificationsQ.put(("PULLED", url, addr))
+                        log.debug(f"Pulled {url} in scrapper", "manage")
+            except zmq.error.ZMQError as e:
+                log.debug(f"No new messages to pull: {e}", "manage")
             time.sleep(1)
             
         pListen.terminate()
