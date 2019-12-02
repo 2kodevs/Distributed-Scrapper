@@ -59,6 +59,8 @@ def noBlockREQ(context, timeout=2000):
     socket.setsockopt(zmq.RCVTIMEO, timeout)
     return socket
         
-        
+def valid_tags(tag):
+    return tag.has_attr('href') or tag.has_attr('src')
+
 
     
