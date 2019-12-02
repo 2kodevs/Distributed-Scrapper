@@ -5,6 +5,9 @@ edit: ## Open the Makefile in editor
 dispatcher: ## Run a dispatcher with default params
 	python dispatcher.py
 
+dispatcher-remote: ## Run a dispatcher with default params and with seed address atached
+	python dispatcher.py -s 127.0.0.1:8101
+
 seed: ## Run a scrapper with default params and seeder flag on
 	python seed.py
 
