@@ -1,6 +1,8 @@
-import socket, logging, hashlib, random, sys, zmq
+import socket, logging, hashlib, random, sys, zmq, time, pickle
 from util.colors import REDB, BLUEB, YELLOWB
-from util.params import format, datefmt
+from util.params import format, datefmt, BROADCAST_PORT, login
+from socket import *
+from multiprocessing import Queue
 
 
 def getIp():
@@ -25,13 +27,16 @@ def makeUuid(n, urls):
     h = hashlib.sha256(name.encode() + str(nounce).encode())
     return int.from_bytes(h.digest(), byteorder=sys.byteorder)
 
+
 parseLevel = lambda x: getattr(logging, x)
+
 
 def LoggerFactory(name="root"):
     logging.setLoggerClass(Logger)
     logging.basicConfig(format=format, datefmt=datefmt)
     return logging.getLogger(name=name)
     
+
 class Logger(logging.getLoggerClass()):
     
     def __init__(self, name = "root", level = logging.NOTSET):
@@ -52,6 +57,7 @@ class Logger(logging.getLoggerClass()):
     def change_color(self, method, color):
         setattr(self, f"{method}_color", color)
         
+
 def noBlockREQ(context, timeout=2000):
     socket = context.socket(zmq.REQ)
     socket.setsockopt(zmq.REQ_RELAXED, 1)
@@ -59,6 +65,79 @@ def noBlockREQ(context, timeout=2000):
     socket.setsockopt(zmq.RCVTIMEO, timeout)
     return socket
         
-        
 
-    
+def discoverPeer(times, log):
+        """
+        Discover a seed in the subnet by broadcast.
+        It not works offline.
+        """
+        sock = socket(AF_INET, SOCK_DGRAM)
+        sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        sock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
+        sock.settimeout(2)
+
+        broadcastAddress = ('255.255.255.255', BROADCAST_PORT)
+        message = login
+        seed = ""
+        network = True
+
+        for i in range(times):
+            try:
+                log.info("Discovering peers", "discoverPeer")
+                sock.sendto(message.encode(), broadcastAddress)
+
+                log.debug("Waiting to receive", "discoverPeer")
+                data, server = sock.recvfrom(4096)
+                header, address = pickle.loads(data)
+                if header == 'WELCOME':
+                    log.debug(f"Received confirmation: {address}", "discoverPeer")
+                    log.info(f"Server: {str(server)}", "discoverPeer")
+                    seed = f"{address[0]}:{address[1]}"
+                    break
+                else:
+                    log.debug("Login failed, retrying...", "discoverPeer")
+            except timeout as e:
+                log.error("Socket " + str(e), "discoverPeer")
+            except Exception as e:
+                log.error(e, "discoverPeer")
+                log.error(f"Connect to a network please, retrying connection in {(i + 1) * 1} seconds...", "discoverPeer")
+                network = False
+                #//TODO: Change factor in production
+                time.sleep((i + 1) * 1)
+
+        sock.close()
+        
+        return seed, network
+
+
+def getSeeds(seed, discoverPeer, address, login, q, log):
+    """
+    Request the list of seed nodes to a active seed, if <seed> is not active, then try to discover a seed active in the network. 
+    """
+    context = zmq.Context()
+    sock = noBlockREQ(context, timeout=1200)
+    sock.connect(f"tcp://{seed}")
+
+    #//TODO: Test this very carefully
+    for i in range(4, 0, -1):
+        try:
+            sock.send_json(("GET_SEEDS",))
+            seeds = sock.recv_pyobj()
+            log.debug(f"Received seeds: {seeds}", "Get Seeds")
+            if login:
+                sock.send_json(("NEW_SEED", address))
+                sock.recv_json()
+            sock.close()
+            q.put(seeds)
+            break
+        except zmq.error.Again as e:
+            log.debug(e, "Get Seeds")
+            seed, _ = discoverPeer(i, log)
+            if seed != "":
+                sock.connect(f"tcp://{seed}")
+        except Exception as e:
+            log.error(e, "Get Seeds")
+        finally:
+            if i == 1:
+                q.put({})
+                
