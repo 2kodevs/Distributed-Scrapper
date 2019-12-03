@@ -31,7 +31,7 @@ def slave(tasks, notifications, idx):
                 if i == 4:
                     notifications.put(("FAILED", url, i))
                 continue
-            notifications.put(("DONE", url, (response.content, response.headers['content-type'] if 'contet-type' in response.headers else "text/html")))
+            notifications.put(("DONE", url, response.content))
             break
         with availableSlaves:
             availableSlaves.value += 1
