@@ -199,7 +199,7 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromIn
             else:
                 log.debug("New seed nodes where finded", "Find Seeds")
 
-            for s in tmp - seeds:
+            for s in dif:
                 for q in peerQs:
                     q.put(s)
             seeds.update(tmp)
