@@ -48,6 +48,7 @@ class Dispatcher:
 
         log.debug(f"Dispatcher created with uuid {uuid}", "Init")
         
+    
     def dispatch(self, queue):
         """
         Start to serve the Dispatcher.
@@ -67,9 +68,11 @@ class Dispatcher:
         graph = {}
         depth = 1
         data = {}
+        modified_data = {}
         url_mapper = {url:f"url_{i}" for i, url in enumerate(self.urls)}
-        while True:
-            # idx = {url: i for i, url in enumerate(self.urls)}
+        
+        src = set()
+        while True:            
             new_data = {}
             while len(self.urls):
                 try:
@@ -95,42 +98,44 @@ class Dispatcher:
                     log.error(e, "dispatch")
                     seeds.append(seeds.pop(0))  
                 time.sleep(1)
-                
-            log.info(f'Depth {depth} done', 'dispatch')
             
-            for url, (html, content) in new_data.items():
+            log.info(f'Depth {depth} done', 'dispatch')
+            for url, html in new_data.items():
                 graph[url] = set()
                 try:
-                    if ';' in content:
-                        content = content[:content.index(';')]
-                    if '.html' in mimetypes.guess_all_extensions(content):
-                        soup = BeautifulSoup(html, 'html.parser')
-                        tags = soup.find_all(valid_tags)
-                        new_urls = [(tag['href'] if tag.has_attr('href') else tag['src']) for tag in tags]
-                        full_urls = [urljoin(url, other) for other in new_urls]
-                        for i, url_dir in enumerate(full_urls):
-                            if url_dir not in url_mapper:
-                                url_mapper[url_dir] = f'url_{len(url_mapper)}'
-                            if tags[i].has_attr('href'):
-                                tags[i]['href'] = url_mapper[url_dir]
-                            else:
-                                tags[i]['src'] = url_mapper[url_dir]
-                        graph[url].update(full_urls)
-                        self.urls.extend(full_urls)
-                        html = soup.html.encode()
-                except:
-                    pass
-                new_data[url] = html
+                    soup = BeautifulSoup(html, 'html.parser')
+                    tags = soup.find_all(valid_tags)
+                    new_urls = [['src', 'href'][tag.has_attr('href')] for tag in tags]
+                    full_urls = [urljoin(url, other) for other in new_urls]
+                    for i, attr in enumerate(new_urls):
+                        url_dir = urljoin(url, tags[i][attr])
+                        graph[url].add(url_dir)
+                        if url_dir not in url_mapper:
+                            url_mapper[url_dir] = f'url_{len(url_mapper)}'
+                        tags[i][attr] = url_mapper[url_dir]
+                        if attr == 'src' or tags[i].name == 'link':
+                            src.add(url_dir)
+                            continue
+                        self.urls.append(url_dir)
+                    html = soup.html.encode()
+                except : # Exception as e:
+                    pass#log.error(f'{e}  ---  {url}, ----- {content}', 'dispatch')
+                modified_data[url] = html
             data.update(new_data)
             self.urls = set(self.urls)
             self.urls.difference_update(self.old)
             self.old.update(self.urls)
             self.urls = list(self.urls)
-            log.error(len(self.urls))
             
-            if depth == self.depth:
+            
+            if depth > self.depth:
                 break
+            if depth == self.depth:
+                src.difference_update(self.old)
+                self.old.update(src)
+                self.urls = list(src)
             depth += 1
+            log.error(len(self.urls))
             
         
         log.info(f"Starting to write data", "dispatch")
@@ -144,17 +149,18 @@ class Dispatcher:
                 os.makedirs(f'downloads/{base}-data')
             except:
                 pass
-            writer(f'downloads/{base}-data', url, self.depth, set(), data, url_mapper, graph)   
+            writer(f'downloads/{base}-data', url, set(), modified_data, url_mapper, graph)   
             
+            # with open(f'downloads/{base}', 'w') as fd:
+            #     fd.write(redirect_to_page % (f'{base}-data/{url_mapper[url]}'))
             html = data[url]
             if len(graph[url]) > 0:
                 soup = BeautifulSoup(html, 'html.parser')
                 tags = soup.find_all(valid_tags)
                 for tag in tags:
-                    if tag.has_attr('href'):
-                        tag['href'] = f'{base}-data/{tag["href"]}'
-                    else:
-                        tag['src'] = f'{base}-data/{tag["src"]}'
+                    attr = ['src', 'href'][tag.has_attr('href')]
+                    name = url_mapper[urljoin(url, tag[attr])]
+                    tag[attr] = f'{base}-data/{name}'
                 html = soup.html.encode()
             with open(f'downloads/{base}', 'wb') as fd:
                 fd.write(html)
@@ -173,11 +179,12 @@ def main(args):
     log.setLevel(parseLevel(args.level))
     
     urls = []
-    if os.path.exists(args.urls):
+    try:
+        assert os.path.exists(args.urls), "No URLs to request"
         with open(args.urls, 'r') as fd:
             urls = json.load(fd)
-    else:
-        log.info("No URLs to request", 'main')
+    except Exception as e:
+        log.error(e, 'main')
     log.error(urls, args.urls)
     uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port, args.depth)
