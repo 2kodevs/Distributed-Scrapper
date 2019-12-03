@@ -1,6 +1,4 @@
 from bs4 import BeautifulSoup
-
-from bs4 import BeautifulSoup
 from util.colors import GREEN, RESET
 from scrapy.http import HtmlResponse
 from urllib.parse import urljoin, urlparse
@@ -11,9 +9,18 @@ from threading import Thread, Lock as tLock, Semaphore
 
 
 log = Logger(name="Dispatcher")
-    
+
+lockSocketReq = tLock()
+counterSocketReq = Semaphore(value=0)
     
 def writer(root, url, old, data, name, graph):
+    """
+    Write all the files on which <url> depends
+    on the <root> folder, taking their contents
+    from <data> and its name from <name>.
+    The <graph> dependency tree is traversed while 
+    there are dependencies that are not found in the <old>
+    """
     if url in old or url not in data:
         return
     old.add(url)
@@ -25,8 +32,6 @@ def writer(root, url, old, data, name, graph):
     for next_url in graph[url]:
         writer(root, next_url, old, data, name, graph)
 
-lockSocketReq = tLock()
-counterSocketReq = Semaphore(value=0)
 
 def connectToSeeds(sock, peerQ):
     """

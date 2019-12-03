@@ -14,6 +14,9 @@ lockSeeds = tLock()
 
 
 def verificator(queue, t, pushQ):
+    '''
+    Manage the list of workers who should be verified    
+    '''
     ansQ = Queue()
     for address, url in iter(queue.get, "STOP"):
         pQuick = Process(target=quickVerification, args=(address, url, t, ansQ))
@@ -25,6 +28,10 @@ def verificator(queue, t, pushQ):
             
 
 def quickVerification(address, url, t, queue):
+    '''
+    Send a verifiSend a verification message 
+    to a worker to find out if he is working and report it 
+    '''
     context = zmq.Context()
     sock = noBlockREQ(context, timeout=t)
     ans = False

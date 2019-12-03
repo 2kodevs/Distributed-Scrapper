@@ -41,7 +41,9 @@ def slave(tasks, notifications, idx):
     
 
 def listener(addr, port):
-    #//TODO: Describe this function
+    '''
+    Process to attend the verification messages sent by the seed
+    '''
     socket = zmq.Context().socket(zmq.REP)
     socket.bind(f"tcp://{addr}:{port}")
     
@@ -75,7 +77,9 @@ def disconnectFromSeeds(sock, inc, lock, counter, peerQ, user):
 
 
 def notifier(notifications, peerQ, deadQ):
-    #//TODO: Describe this function
+    '''
+    Process to send status notifications to seeds
+    '''
     context = zmq.Context()
     socket = noBlockREQ(context)
 
@@ -113,7 +117,6 @@ def notifier(notifications, peerQ, deadQ):
                 time.sleep(0.5)
 
         
-
 class Scrapper:
     """
     Represents a scrapper, the worker node in the Scrapper network.
