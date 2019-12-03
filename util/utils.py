@@ -1,4 +1,4 @@
-import socket, logging, hashlib, random, sys, zmq, time, pickle
+import socket, logging, hashlib, random, sys, zmq, time, pickle, queue
 from util.colors import REDB, BLUEB, YELLOWB
 from util.params import format, datefmt, BROADCAST_PORT, login, localhost
 from socket import *
@@ -157,12 +157,12 @@ def ping(seed, q, time, log):
         msg = socket.recv_json()
         log.debug(f"Received {msg} from {seed[0]}:{seed[1]} after ping", "Ping")
     except zmq.error.Again as e:
-        log.debug(e, "Ping")
+        log.debug(f"PING failed -- {e}", "Ping")
         status = False
     q.put(status)
 
 
-def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15):
+def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromInput=None):
     """
     Process that ask to a seed for his list of seeds.
     """
@@ -181,11 +181,10 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15):
             pPing.start()
             status = pingQ.get()
             pPing.terminate()
-            if status:
-                break
-            for q in deadQs:
-                q.put(s)               
-            seeds.remove(s)
+            if not status:
+                for q in deadQs:
+                    q.put(s)               
+                seeds.remove(s)
         seedsQ = Queue()
         pGetSeeds = Process(target=getSeeds, name="Get Seeds", args=(f"{seed[0]}:{seed[1]}", discoverPeer, None, False, seedsQ, log))
         log.debug("Finding new seeds to pull from...", "Find Seeds")
