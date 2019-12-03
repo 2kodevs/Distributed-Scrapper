@@ -19,8 +19,8 @@ def downloadsWriter(queue):
     log.debug("All data saved")
     
     
-def writer(root, url, depth, old, data, name, graph):
-    if url in old:
+def writer(root, url, old, data, name, graph):
+    if url in old or url not in data:
         return
     old.add(url)
     
@@ -28,9 +28,8 @@ def writer(root, url, depth, old, data, name, graph):
     with open(f'{root}/{url_name}', 'wb') as fd:
         fd.write(data[url])
         
-    if depth > 1:
-        for next_url in graph[url]:
-            writer(root, next_url, depth - 1, old, data, name, graph)
+    for next_url in graph[url]:
+        writer(root, next_url, old, data, name, graph)
 
             
 class Dispatcher:
