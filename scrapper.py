@@ -49,52 +49,28 @@ def listener(addr, port):
         socket.send_json(True)
     
 
-def connectToSeeds1(sock, peerQ):
+def connectToSeeds(sock, inc, lock, counter, peerQ, user):
     """
-    Thread that connect pull socket to seeds.
-    """
-    for addr, port in iter(peerQ.get, "STOP"):
-        with lockSocketPull:
-            log.debug(f"Connecting to seed {addr}:{port + 1}","Connect to Seeds1")
-            sock.connect(f"tcp://{addr}:{port + 1}")
-            counterSocketPull.release()
-            log.info(f"Scrapper connected to seed with address:{addr}:{port + 1})", "Connect to Seeds1")
-
-
-def disconnectFromSeeds1(sock, peerQ):
-    """
-    Thread that disconnect pull socket from seeds.
+    Thread that connect <sock> socket to seeds.
     """
     for addr, port in iter(peerQ.get, "STOP"):
-        with lockSocketPull:
-            log.debug(f"Disconnecting from seed {addr}:{port + 1}","Disconnect from Seeds1")
-            sock.disconnect(f"tcp://{addr}:{port + 1}")
-            counterSocketPull.acquire()
-            log.info(f"Scrapper disconnected from seed with address:{addr}:{port + 1})", "Disconnect from Seeds1")
+        with lock:
+            log.debug(f"Connecting to seed {addr}:{port + inc}", f"Connect to Seeds -- {user} socket")
+            sock.connect(f"tcp://{addr}:{port + inc}")
+            counter.release()
+            log.info(f"Scrapper connected to seed with address:{addr}:{port + inc})", f"Connect to Seeds -- {user} socket")
 
 
-def connectToSeeds2(sock, peerQ):
+def disconnectFromSeeds(sock, inc, lock, counter, peerQ, user):
     """
-    Thread that connect REQ socket to seeds.
+    Thread that disconnect <sock> socket from seeds.
     """
     for addr, port in iter(peerQ.get, "STOP"):
-        with lockSocketNotifier:
-            log.debug(f"Connecting to seed {addr}:{port + 2}","Connect to Seeds2")
-            sock.connect(f"tcp://{addr}:{port + 2}")
-            counterSocketNotifier.release()
-            log.info(f"Scrapper connected to seed with address:{addr}:{port + 2})", "Connect to Seeds2")
-    
-
-def disconnectFromSeeds2(sock, peerQ):
-    """
-    Thread that disconnect REQ socket from seeds.
-    """
-    for addr, port in iter(peerQ.get, "STOP"):
-        with lockSocketNotifier:
-            log.debug(f"Disconnecting from seed {addr}:{port + 2}","Disconnect from Seeds2")
-            sock.disconnect(f"tcp://{addr}:{port + 2}")
-            counterSocketNotifier.acquire()
-            log.info(f"Scrapper disconnected from seed with address:{addr}:{port + 2})", "Disconnect from Seeds2")
+        with lock:
+            log.debug(f"Disconnecting from seed {addr}:{port + inc}", f"Disconnect from Seeds -- {user} socket")
+            sock.disconnect(f"tcp://{addr}:{port + inc}")
+            counter.acquire()
+            log.info(f"Scrapper disconnected from seed with address:{addr}:{port + inc})", f"Disconnect from Seeds -- {user} socket")
 
 
 def notifier(notifications, peerQ, deadQ):
@@ -102,10 +78,12 @@ def notifier(notifications, peerQ, deadQ):
     context = zmq.Context()
     socket = noBlockREQ(context)
 
-    connectT = Thread(target=connectToSeeds2, name="Connect to Seeds", args=(socket, peerQ))
+    #Thread that connect REQ socket to seeds
+    connectT = Thread(target=connectToSeeds, name="Connect to Seeds - Notifier", args=(socket, 2, lockSocketNotifier, counterSocketNotifier, peerQ, "Notifier"))
     connectT.start()
 
-    disconnectT = Thread(target=disconnectFromSeeds2, name="Disconnect from Seeds", args=(socket, deadQ))
+    #Thread that disconnect REQ socket from seeds
+    disconnectT = Thread(target=disconnectFromSeeds, name="Disconnect from Seeds - Notifier", args=(socket, 2, lockSocketNotifier, counterSocketNotifier, deadQ, "Notifier"))
     disconnectT.start()
 
     for msg in iter(notifications.get, "STOP"):
@@ -192,13 +170,15 @@ class Scrapper:
             seedsQ1.put(address)
             seedsQ2.put(address)
 
-        connectT = Thread(target=connectToSeeds1, name="Connect to Seeds", args=(socketPull, seedsQ1))
+        #Thread that connect pull socket to seeds
+        connectT = Thread(target=connectToSeeds, name="Connect to Seeds - Pull", args=(socketPull, 1, lockSocketPull, counterSocketPull, seedsQ1, "Pull"))
         connectT.start()
 
         toDisconnectQ1 = Queue()
         toDisconnectQ2 = Queue()
 
-        disconnectT = Thread(target=disconnectFromSeeds1, name="Disconnect from Seeds", args=(socketPull, toDisconnectQ1))
+        #Thread that disconnect pull socket from seeds
+        disconnectT = Thread(target=disconnectFromSeeds, name="Disconnect from Seeds - Pull", args=(socketPull, 1, lockSocketPull, counterSocketPull, toDisconnectQ1, "Notifier"))
         disconnectT.start()
 
         pFindSeeds = Process(target=findSeeds, name="Find Seeds", args=(set(self.seeds), [seedsQ1, seedsQ2], [toDisconnectQ1, toDisconnectQ2], log))
