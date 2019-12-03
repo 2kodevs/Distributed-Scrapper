@@ -70,7 +70,7 @@ def disconnectFromSeeds1(sock, peerQ):
             log.debug(f"Disconnecting from seed {addr}:{port + 1}","Disconnect from Seeds1")
             sock.disconnect(f"tcp://{addr}:{port + 1}")
             counterSocketPull.acquire()
-            log.info(f"Dispatcher disconnected from seed with address:{addr}:{port + 1})", "Disconnect from Seeds1")
+            log.info(f"Scrapper disconnected from seed with address:{addr}:{port + 1})", "Disconnect from Seeds1")
 
 
 def connectToSeeds2(sock, peerQ):
@@ -94,7 +94,7 @@ def disconnectFromSeeds2(sock, peerQ):
             log.debug(f"Disconnecting from seed {addr}:{port + 2}","Disconnect from Seeds2")
             sock.disconnect(f"tcp://{addr}:{port + 2}")
             counterSocketNotifier.acquire()
-            log.info(f"Dispatcher disconnected from seed with address:{addr}:{port + 2})", "Disconnect from Seeds2")
+            log.info(f"Scrapper disconnected from seed with address:{addr}:{port + 2})", "Disconnect from Seeds2")
 
 
 def notifier(notifications, peerQ, deadQ):
