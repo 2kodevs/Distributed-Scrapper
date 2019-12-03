@@ -205,5 +205,11 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15):
                     q.put(s)
             seeds.update(tmp)
 
+            if seedFromInput is not None:
+                try:
+                    seeds.add(seedFromInput.get(block=False))
+                except queue.Empty:
+                    pass
+
         #//TODO: Change the amount of the sleep in production
         time.sleep(sleepTime)

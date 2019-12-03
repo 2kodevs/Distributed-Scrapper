@@ -44,6 +44,38 @@ def disconnectToSeeds(sock, peerQ):
             log.info(f"Dispatcher disconnected to seed with address:{addr}:{port})", "Disconnect to Seeds")
 
 
+def getSeedFromFile(peerQ, extraQ):
+    """
+    Process that gets an address of a seed node by standart input.
+    """
+    #Creating seed.txt
+    log.debug("Creating network.txt...", "Get seed from file")
+    newFile = open("network.txt", "w")
+    newFile.close()
+
+    while True:
+        #get input
+        with open("network.txt", "r") as f:
+            s = f.read()
+            if s == "":
+                time.sleep(1)
+                continue
+            log.info(f"Get \"{s}\" from network.txt", "Get seed from file")
+        with open("network.txt", "w") as f:
+            f.write("")
+
+        #ip_address:port_number
+        regex = re.compile("\d{,3}\.\d{,3}\.\d{,3}\.\d{,3}:\d+")
+        try:
+            assert regex.match(s).end() == len(s)
+            addr, port = s.split(":")
+            peerQ.put((addr, int(port)))
+            extraQ.put((addr, int(port)))
+        except (AssertionError, AttributeError):
+            log.error(f"Parameter seed inserted is not a valid ip_address:port_number", "Get seed from file")
+            seed = None
+
+
 class Dispatcher:
     """
     Represents a client to the services of the Scrapper.
@@ -101,19 +133,23 @@ class Dispatcher:
         context = zmq.Context()
         socket = noBlockREQ(context)
         
-        seedsQ = Queue()
+        seedsQ1 = Queue()
+        seedsQ2 = Queue()
         for address in self.seeds:
-            seedsQ.put(address)
+            seedsQ1.put(address)
 
-        connectT = Thread(target=connectToSeeds, name="Connect to Seeds", args=(socket, seedsQ))
+        connectT = Thread(target=connectToSeeds, name="Connect to Seeds", args=(socket, seedsQ1))
         connectT.start()
 
         toDisconnectQ = Queue()
         disconnectT = Thread(target=disconnectToSeeds, name="Disconnect to Seeds", args=(socket, toDisconnectQ))
         disconnectT.start()
 
-        pFindSeeds = Process(target=findSeeds, name="Find Seeds", args=(set(self.seeds), [seedsQ], [toDisconnectQ], log, 2000, 10))
+        pFindSeeds = Process(target=findSeeds, name="Find Seeds", args=(set(self.seeds), [seedsQ1], [toDisconnectQ], log, 2000, 10, seedsQ2))
         pFindSeeds.start()
+
+        pInput = Process(target=getSeedFromFile, name="Get seed from file", args=(seedsQ1, seedsQ2))
+        pInput.start()
 
         downloadsQ = Queue()
         pWriter = Process(target=downloadsWriter, args=(downloadsQ,))
@@ -165,6 +201,8 @@ def main(args):
     while not d.login(seed):
         log.info("Enter an address of an existing seed node. Insert as ip_address:port_number. Press ENTER if you want to omit this address. Press q if you want to exit the program")
         seed = input("-->")
+        if seed == '':
+            continue
         seed = seed.split()[0]
         if seed == 'q':
             break
