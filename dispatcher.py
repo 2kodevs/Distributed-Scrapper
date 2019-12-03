@@ -5,18 +5,10 @@ from scrapy.http import HtmlResponse
 from urllib.parse import urljoin, urlparse
 from multiprocessing import Process, Queue
 import zmq, time, os, mimetypes, pickle, json
-from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, valid_tags
+from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, valid_tags, change_html
 
 
 log = Logger(name="Dispatcher")
-
-
-def downloadsWriter(queue):
-    for index, url, data in iter(queue.get, "STOP"):
-        with open(f"downloads/html{index}", "w") as fd:
-            log.info(f"{url} saved")
-            fd.write(data)
-    log.debug("All data saved")
     
     
 def writer(root, url, old, data, name, graph):
@@ -68,7 +60,6 @@ class Dispatcher:
         graph = {}
         depth = 1
         data = {}
-        modified_data = {}
         url_mapper = {url:f"url_{i}" for i, url in enumerate(self.urls)}
         
         src = set()
@@ -86,7 +77,6 @@ class Dispatcher:
                     self.urls.pop(0)
                     if download:
                         log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
-                        #downloadsQ.put((idx[url], url, html))
                         new_data[url] = html
                     else:
                         self.urls.append(url)
@@ -103,24 +93,27 @@ class Dispatcher:
             for url, html in new_data.items():
                 graph[url] = set()
                 try:
+                    text = html.decode()
                     soup = BeautifulSoup(html, 'html.parser')
                     tags = soup.find_all(valid_tags)
                     new_urls = [['src', 'href'][tag.has_attr('href')] for tag in tags]
-                    full_urls = [urljoin(url, other) for other in new_urls]
+                    changes = []
                     for i, attr in enumerate(new_urls):
                         url_dir = urljoin(url, tags[i][attr])
                         graph[url].add(url_dir)
                         if url_dir not in url_mapper:
                             url_mapper[url_dir] = f'url_{len(url_mapper)}'
-                        tags[i][attr] = url_mapper[url_dir]
+                        changes.append((tags[i][attr], url_mapper[url_dir]))
                         if attr == 'src' or tags[i].name == 'link':
                             src.add(url_dir)
                             continue
                         self.urls.append(url_dir)
-                    html = soup.html.encode()
-                except : # Exception as e:
-                    pass#log.error(f'{e}  ---  {url}, ----- {content}', 'dispatch')
-                modified_data[url] = html
+                    html = change_html(text, changes).encode()
+                except UnicodeDecodeError:
+                    log.debug(f'{url} is not decodeable', 'dispatch')
+                except: # BeautifulSoup strange exceptions related with it's logger
+                    pass
+                new_data[url] = html
             data.update(new_data)
             self.urls = set(self.urls)
             self.urls.difference_update(self.old)
@@ -149,19 +142,16 @@ class Dispatcher:
                 os.makedirs(f'downloads/{base}-data')
             except:
                 pass
-            writer(f'downloads/{base}-data', url, set(), modified_data, url_mapper, graph)   
+            writer(f'downloads/{base}-data', url, set(), data, url_mapper, graph)   
             
-            # with open(f'downloads/{base}', 'w') as fd:
-            #     fd.write(redirect_to_page % (f'{base}-data/{url_mapper[url]}'))
             html = data[url]
             if len(graph[url]) > 0:
-                soup = BeautifulSoup(html, 'html.parser')
-                tags = soup.find_all(valid_tags)
-                for tag in tags:
-                    attr = ['src', 'href'][tag.has_attr('href')]
-                    name = url_mapper[urljoin(url, tag[attr])]
-                    tag[attr] = f'{base}-data/{name}'
-                html = soup.html.encode()
+                text = data[url].decode()
+                changes = []
+                for dep in graph[url]:
+                    name = url_mapper[dep]
+                    changes.append((name, f'{base}-data/{name}'))
+                html = change_html(text, changes).encode()
             with open(f'downloads/{base}', 'wb') as fd:
                 fd.write(html)
             
