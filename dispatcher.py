@@ -1,11 +1,13 @@
 from bs4 import BeautifulSoup
-from util.params import seeds
+
+from bs4 import BeautifulSoup
 from util.colors import GREEN, RESET
 from scrapy.http import HtmlResponse
 from urllib.parse import urljoin, urlparse
 from multiprocessing import Process, Queue
-import zmq, time, os, mimetypes, pickle, json
-from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, valid_tags, change_html
+import zmq, time, os, pickle, json, re
+from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds, findSeeds, valid_tags, change_html
+from threading import Thread, Lock as tLock, Semaphore
 
 
 log = Logger(name="Dispatcher")
@@ -23,7 +25,65 @@ def writer(root, url, old, data, name, graph):
     for next_url in graph[url]:
         writer(root, next_url, old, data, name, graph)
 
-            
+lockSocketReq = tLock()
+counterSocketReq = Semaphore(value=0)
+
+def connectToSeeds(sock, peerQ):
+    """
+    Thread that connect REQ socket to seeds.
+    """
+    for addr, port in iter(peerQ.get, "STOP"):
+        with lockSocketReq:
+            log.debug(f"Connecting to seed {addr}:{port}","Connect to Seeds")
+            sock.connect(f"tcp://{addr}:{port}")
+            counterSocketReq.release()
+            log.info(f"Dispatcher connected to seed with address:{addr}:{port})", "Connect to Seeds")
+
+
+def disconnectToSeeds(sock, peerQ):
+    """
+    Thread that disconnect REQ socket to seeds.
+    """
+    for addr, port in iter(peerQ.get, "STOP"):
+        with lockSocketReq:
+            log.debug(f"Disconnecting to seed {addr}:{port}","Disconnect to Seeds")
+            sock.disconnect(f"tcp://{addr}:{port}")
+            counterSocketReq.acquire()
+            log.info(f"Dispatcher disconnected to seed with address:{addr}:{port})", "Disconnect to Seeds")
+
+
+def getSeedFromFile(peerQ, extraQ):
+    """
+    Process that gets an address of a seed node by standart input.
+    """
+    #Creating seed.txt
+    log.debug("Creating network.txt...", "Get seed from file")
+    newFile = open("network.txt", "w")
+    newFile.close()
+
+    while True:
+        #get input
+        with open("network.txt", "r") as f:
+            s = f.read()
+            if s == "":
+                time.sleep(1)
+                continue
+            log.info(f"Get \"{s}\" from network.txt", "Get seed from file")
+        with open("network.txt", "w") as f:
+            f.write("")
+
+        #ip_address:port_number
+        regex = re.compile("\d{,3}\.\d{,3}\.\d{,3}\.\d{,3}:\d+")
+        try:
+            assert regex.match(s).end() == len(s)
+            addr, port = s.split(":")
+            peerQ.put((addr, int(port)))
+            extraQ.put((addr, int(port)))
+        except (AssertionError, AttributeError):
+            log.error(f"Parameter seed inserted is not a valid ip_address:port_number", "Get seed from file")
+            seed = None
+
+
 class Dispatcher:
     """
     Represents a client to the services of the Scrapper.
@@ -40,18 +100,67 @@ class Dispatcher:
 
         log.debug(f"Dispatcher created with uuid {uuid}", "Init")
         
-    
+
+    def login(self, seed):
+        """
+        Login the node in the system.
+        """
+        network = True
+        if seed is not None:
+            #ip_address:port_number
+            regex = re.compile("\d{,3}\.\d{,3}\.\d{,3}\.\d{,3}:\d+")
+            try:
+                assert regex.match(seed).end() == len(seed)
+            except (AssertionError, AttributeError):
+                log.error(f"Parameter seed inserted is not a valid ip_address:port_number")
+                seed = None
+
+        if seed is None:
+            #//TODO: Change times param in production
+            log.debug("Discovering seed nodes", "login")
+            seed, network = discoverPeer(3, log)
+            if seed == "":
+                log.error("Login failed, get the address of a active master node or connect to the same network that the service", "login")
+                return False
+
+        seedsQ = Queue()
+        pGetSeeds = Process(target=getSeeds, name="Get Seeds", args=(seed, discoverPeer, (self.address, self.port), False, seedsQ, log))
+        pGetSeeds.start()
+        self.seeds = seedsQ.get()
+        pGetSeeds.terminate()
+
+        if not len(self.seeds):
+            log.error("Login failed, get the address of a active master node or connect to the same network that the service", "login")
+            return False
+
+        log.info("Login finished", "login")
+        return network
+
+
     def dispatch(self, queue):
         """
         Start to serve the Dispatcher.
         """
         context = zmq.Context()
         socket = noBlockREQ(context)
+        
+        seedsQ1 = Queue()
+        seedsQ2 = Queue()
+        for address in self.seeds:
+            seedsQ1.put(address)
 
-        #//TODO: Connect to seeds in a way that a new seed can be added
-        for addr, port in seeds:
-            socket.connect(f"tcp://{addr}:{port}")
-            log.info(f"connected to {addr}:{port}", "dispatch")
+        connectT = Thread(target=connectToSeeds, name="Connect to Seeds", args=(socket, seedsQ1))
+        connectT.start()
+
+        toDisconnectQ = Queue()
+        disconnectT = Thread(target=disconnectToSeeds, name="Disconnect to Seeds", args=(socket, toDisconnectQ))
+        disconnectT.start()
+
+        pFindSeeds = Process(target=findSeeds, name="Find Seeds", args=(set(self.seeds), [seedsQ1], [toDisconnectQ], log, 2000, 10, seedsQ2))
+        pFindSeeds.start()
+
+        pInput = Process(target=getSeedFromFile, name="Get seed from file", args=(seedsQ1, seedsQ2))
+        pInput.start()
 
         downloadsQ = Queue()
         pWriter = Process(target=downloadsWriter, args=(downloadsQ,))
@@ -162,9 +271,9 @@ class Dispatcher:
         downloadsQ.put("STOP")
         pWriter.join()
         queue.put(True)
+        pFindSeeds.terminate()
         
         
-
 def main(args):
     log.setLevel(parseLevel(args.level))
     
@@ -178,23 +287,35 @@ def main(args):
     log.error(urls, args.urls)
     uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port, args.depth)
-    terminateQ = Queue()
-    pDispatch = Process(target=d.dispatch, args=(terminateQ,))
-    pDispatch.start()
-    terminateQ.get()
-    log.info(f"Dispatcher:{uuid} finish!!!", "main")
-    pDispatch.terminate()
+    seed = args.seed
+    while not d.login(seed):
+        log.info("Enter an address of an existing seed node. Insert as ip_address:port_number. Press ENTER if you want to omit this address. Press q if you want to exit the program")
+        seed = input("-->")
+        if seed == '':
+            continue
+        seed = seed.split()[0]
+        if seed == 'q':
+            break
+    if seed != 'q':
+        terminateQ = Queue()
+        pDispatch = Process(target=d.dispatch, args=(terminateQ,))
+        pDispatch.start()
+        terminateQ.get()
+        log.info(f"Dispatcher:{uuid} finish!!!", "main")
+        pDispatch.terminate()
 
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description='Client of a distibuted scrapper')
-    parser.add_argument('-p', '--port', type=int, default=4142, help='connection port')
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
+    parser.add_argument('-p', '--port', type=int, default=4142, help='connection port')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
-    parser.add_argument('-d', '--depth', type=int, default=1, help='log level')
-    parser.add_argument('-u', '--urls', type=str, default='urls', help='log level')
+    parser.add_argument('-d', '--depth', type=int, default=1, help='recursively downloads depth')
+    parser.add_argument('-u', '--urls', type=str, default='urls', help='file that contains the urls set')
+    parser.add_argument('-s', '--seed', type=str, default=None, help='address of an existing seed node. Insert as ip_address:port_number')
+
 
     #//TODO: use another arg to set the path to a file that contains the set of urls
 

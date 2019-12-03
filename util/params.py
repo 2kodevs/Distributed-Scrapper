@@ -15,18 +15,12 @@ seeds = [(localhost, 8101), (localhost, 9000)]
 
 login = "DISTRIBUTED-SCRAPPER"
 
+BROADCAST_PORT = 4142
+
 #//TODO: Add this description to README.md
 """
 
 List of port usage:
-
-Scrapper:
-main_port(mp): to publish NEW_CLIENT
-mp + 1:        to receive new clients
-
-Dispacher:
-mp:            to push tasks
-mp + 1:        to receive results
 
 Seed:
 mp:            to attend clients
