@@ -63,4 +63,9 @@ def valid_tags(tag):
     return tag.has_attr('href') or tag.has_attr('src')
 
 
-    
+def change_html(html, changes):
+    changes.sort(key=lambda x: len(x[0]), reverse=True)
+    for url, name in changes:
+        html = html.replace(f'"{url}"', f'"{name}"')
+        html = html.replace(f"'{url}'", f"'{name}'")
+    return html     
