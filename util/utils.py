@@ -1,7 +1,7 @@
 import socket, logging, hashlib, random, sys, zmq, time, pickle, queue
 from util.colors import REDB, BLUEB, YELLOWB
 from util.params import format, datefmt, BROADCAST_PORT, login, localhost
-from socket import *
+from socket import socket, AF_INET, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR, SO_BROADCAST, timeout
 from multiprocessing import Process, Queue
 
 
@@ -201,12 +201,9 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromIn
     while True:
         #random address
         seed = (localhost, 9999)
-        #to access seeds in a random mode every iteration
         data = list(seeds)
-        random.shuffle(data)
         for s in data:
             #This process is useful to know if a seed is dead too
-            seed = s
             pingQ = Queue()
             pPing = Process(target=ping, name="Ping", args=(s, pingQ, timeout, log))
             pPing.start()
@@ -216,6 +213,8 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromIn
                 for q in deadQs:
                     q.put(s)               
                 seeds.remove(s)
+            else:
+                seed = s
         seedsQ = Queue()
         pGetSeeds = Process(target=getSeeds, name="Get Seeds", args=(f"{seed[0]}:{seed[1]}", discoverPeer, None, False, seedsQ, log))
         log.debug("Finding new seeds to pull from...", "Find Seeds")

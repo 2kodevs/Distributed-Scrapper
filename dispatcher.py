@@ -1,9 +1,9 @@
+import zmq, time, os, json, re
 from bs4 import BeautifulSoup
 from util.colors import GREEN, RESET
 from scrapy.http import HtmlResponse
 from urllib.parse import urljoin, urlparse
 from multiprocessing import Process, Queue
-import zmq, time, os, pickle, json, re
 from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds, findSeeds, valid_tags, change_html
 from threading import Thread, Lock as tLock, Semaphore
 
@@ -13,13 +13,14 @@ log = Logger(name="Dispatcher")
 lockSocketReq = tLock()
 counterSocketReq = Semaphore(value=0)
     
+    
 def writer(root, url, old, data, name, graph):
     """
     Write all the files on which <url> depends
     on the <root> folder, taking their contents
     from <data> and its name from <name>.
     The <graph> dependency tree is traversed while 
-    there are dependencies that are not found in the <old>
+    there are dependencies that are not found in <old>
     """
     if url in old or url not in data:
         return
@@ -167,24 +168,21 @@ class Dispatcher:
         pInput = Process(target=getSeedFromFile, name="Get seed from file", args=(seedsQ1, seedsQ2))
         pInput.start()
 
-        downloadsQ = Queue()
-        pWriter = Process(target=downloadsWriter, args=(downloadsQ,))
-        pWriter.start()
-
         graph = {}
         depth = 1
         data = {}
         url_mapper = {url:f"url_{i}" for i, url in enumerate(self.urls)}
         
         src = set()
-        while True:            
+        while True:   
             new_data = {}
             while len(self.urls):
                 try:
                     url = self.urls[0]
-                    socket.send_json(("URL", url))
-                    log.debug(f"send {url}", "dispatch")
-                    response = pickle.loads(socket.recv())
+                    with counterSocketReq:
+                        socket.send_json(("URL", url))
+                        log.debug(f"send {url}", "dispatch")
+                        response = socket.recv_pyobj()
                     assert len(response) == 2, "bad response size"
                     download, html = response
                     log.debug(f"Received {download}", "dispatch")
@@ -202,7 +200,7 @@ class Dispatcher:
                     log.error(e, "dispatch")
                     seeds.append(seeds.pop(0))  
                 time.sleep(1)
-            
+                 
             log.info(f'Depth {depth} done', 'dispatch')
             for url, html in new_data.items():
                 graph[url] = set()
@@ -234,7 +232,6 @@ class Dispatcher:
             self.old.update(self.urls)
             self.urls = list(self.urls)
             
-            
             if depth > self.depth:
                 break
             if depth == self.depth:
@@ -242,9 +239,8 @@ class Dispatcher:
                 self.old.update(src)
                 self.urls = list(src)
             depth += 1
-            log.error(len(self.urls))
+            log.info(f"Number of URLs to be requested for download: {len(self.urls)}", "dispatch")
             
-        
         log.info(f"Starting to write data", "dispatch")
         for i, url in enumerate(self.originals):
             try:
@@ -273,7 +269,6 @@ class Dispatcher:
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
         #disconnect
 
-        downloadsQ.put("STOP")
         pWriter.join()
         queue.put(True)
         pFindSeeds.terminate()
@@ -289,10 +284,12 @@ def main(args):
             urls = json.load(fd)
     except Exception as e:
         log.error(e, 'main')
-    log.error(urls, args.urls)
+        
+    log.info(urls, "main")
     uuid = makeUuid(2**55, urls)
     d = Dispatcher(urls, uuid, args.address, args.port, args.depth)
     seed = args.seed
+    
     while not d.login(seed):
         log.info("Enter an address of an existing seed node. Insert as ip_address:port_number. Press ENTER if you want to omit this address. Press q if you want to exit the program")
         seed = input("-->")
@@ -301,6 +298,7 @@ def main(args):
         seed = seed.split()[0]
         if seed == 'q':
             break
+        
     if seed != 'q':
         terminateQ = Queue()
         pDispatch = Process(target=d.dispatch, args=(terminateQ,))

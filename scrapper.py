@@ -41,9 +41,9 @@ def slave(tasks, notifications, idx):
     
 
 def listener(addr, port):
-    '''
-    Process to attend the verification messages sent by the seed
-    '''
+    """
+    Process to attend the verification messages sent by the seed.
+    """
     socket = zmq.Context().socket(zmq.REP)
     socket.bind(f"tcp://{addr}:{port}")
     
@@ -77,9 +77,9 @@ def disconnectFromSeeds(sock, inc, lock, counter, peerQ, user):
 
 
 def notifier(notifications, peerQ, deadQ):
-    '''
-    Process to send status notifications to seeds
-    '''
+    """
+    Process to send notifications of task's status to seeds.
+    """
     context = zmq.Context()
     socket = noBlockREQ(context)
 
@@ -102,8 +102,9 @@ def notifier(notifications, peerQ, deadQ):
                 with lockSocketNotifier:
                     if counterSocketNotifier.acquire(timeout=1):
                         log.debug(f"Sending msg: ({msg[0]}, {msg[1]}, data) to a seed", "Worker Notifier")
-                        socket.send_json(msg)
-                        # nothing important receive
+                        #msg: (flag, url, data)
+                        socket.send_pyobj(msg)
+                        # nothing important to receive
                         socket.recv()
                         counterSocketNotifier.release()
                         break
