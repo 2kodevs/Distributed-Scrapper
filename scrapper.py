@@ -16,6 +16,7 @@ lockSocketNotifier = tLock()
 counterSocketPull = Semaphore(value=0)
 counterSocketNotifier = Semaphore(value=0)
 
+
 def slave(tasks, notifications, idx):
     """
     Child Process of Scrapper, responsable of downloading the urls.
