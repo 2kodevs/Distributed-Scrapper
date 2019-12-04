@@ -1,4 +1,5 @@
-import zmq, logging, time, os, requests, re
+import zmq, logging, time, os, requests, pickle, re
+from util.params import seeds, localhost
 from multiprocessing import Process, Lock, Queue, Value
 from ctypes import c_int
 from threading import Thread, Lock as tLock,Semaphore
@@ -33,14 +34,16 @@ def slave(tasks, notifications, idx):
                 if i == 4:
                     notifications.put(("FAILED", url, i))
                 continue
-            notifications.put(("DONE", url, response.text))
+            notifications.put(("DONE", url, response.content))
             break
         with availableSlaves:
             availableSlaves.value += 1
     
 
 def listener(addr, port):
-    #//TODO: Describe this function
+    """
+    Process to attend the verification messages sent by the seed.
+    """
     socket = zmq.Context().socket(zmq.REP)
     socket.bind(f"tcp://{addr}:{port}")
     
@@ -74,7 +77,9 @@ def disconnectFromSeeds(sock, inc, lock, counter, peerQ, user):
 
 
 def notifier(notifications, peerQ, deadQ):
-    #//TODO: Describe this function
+    """
+    Process to send notifications of task's status to seeds.
+    """
     context = zmq.Context()
     socket = noBlockREQ(context)
 
@@ -97,8 +102,9 @@ def notifier(notifications, peerQ, deadQ):
                 with lockSocketNotifier:
                     if counterSocketNotifier.acquire(timeout=1):
                         log.debug(f"Sending msg: ({msg[0]}, {msg[1]}, data) to a seed", "Worker Notifier")
-                        socket.send_json(msg)
-                        # nothing important receive
+                        #msg: (flag, url, data)
+                        socket.send_pyobj(msg)
+                        # nothing important to receive
                         socket.recv()
                         counterSocketNotifier.release()
                         break
@@ -112,7 +118,6 @@ def notifier(notifications, peerQ, deadQ):
                 time.sleep(0.5)
 
         
-
 class Scrapper:
     """
     Represents a scrapper, the worker node in the Scrapper network.

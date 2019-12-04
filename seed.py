@@ -3,7 +3,8 @@ from multiprocessing import Process, Queue
 from threading import Thread, Lock as tLock
 from util.params import login, BROADCAST_PORT
 from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds
-from socket import *
+from socket import socket, AF_INET, SOCK_DGRAM
+
 
 log = Logger(name="Seed")
 pMainLog = "main"
@@ -14,8 +15,11 @@ lockSeeds = tLock()
 
 
 def verificator(queue, t, pushQ):
-    ansQ = Queue()
+    """
+    Process that manage the list of workers who should be verified. 
+    """
     for address, url in iter(queue.get, "STOP"):
+        ansQ = Queue()
         pQuick = Process(target=quickVerification, args=(address, url, t, ansQ))
         pQuick.start()
         ans = ansQ.get()
@@ -25,6 +29,10 @@ def verificator(queue, t, pushQ):
             
 
 def quickVerification(address, url, t, queue):
+    """
+    Process that send a verification message to a worker 
+    to find out if he is working and report it.
+    """
     context = zmq.Context()
     sock = noBlockREQ(context, timeout=t)
     ans = False
@@ -66,15 +74,17 @@ def workerAttender(pulledQ, resultQ, failedQ, addr):
 
     while True:
         try:
-            msg = sock.recv_json()
+            msg = sock.recv_pyobj()
             if msg[0] == "PULLED":
-                #msg = PULLED, url, workerAddr
                 log.info(f"Message received: {msg}", "Worker Attender")
+                #msg = PULLED, url, workerAddr
                 pulledQ.put((False, msg[1], msg[2]))
             elif msg[0] == "DONE":
+                log.info(f"Message received: ({msg[0]}, {msg[1]})", "Worker Attender")
                 #msg = DONE, url, html
                 resultQ.put((True, msg[1], msg[2]))
             elif msg[0] == "FAILED":
+                log.info(f"Message received: {msg}", "Worker Attender")
                 #msg = FAILED, url, timesAttempted
                 failedQ.put((False, msg[1], msg[1]))
 
@@ -208,7 +218,7 @@ def getRemoteTasks(seed, tasksQ):
     for _ in range(2):
         try:
             sock.send_json(("GET_TASKS",))
-            response = sock.recv_json()
+            response = sock.recv_pyobj()
             log.debug(f"Tasks received", "Get Remote Tasks")
             assert isinstance(response, dict), f"Bad response, expected dict received {type(response)}"
             tasksQ.put(response)
@@ -330,7 +340,7 @@ class Seed:
         taskManager2T = Thread(target=taskManager, name="Task Manager - DONE", args=(self.tasks, resultQ, taskToPubQ, True))
         taskManager3T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
         seedManagerT = Thread(target=seedManager, name="Seed Manager", args=(self.seeds, newSeedsQ))
-        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 30))
+        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 3000000))
 
         pPush.start()
         pWorkerAttender.start()
@@ -357,7 +367,7 @@ class Seed:
                         try:
                             res = self.tasks[url]
                             if not res[0]:
-                                if isinstance(res[1], list):
+                                if isinstance(res[1], tuple):
                                     log.debug(f"Verificating {url} in the system...", "serve")
                                     verificationQ.put((res[1], url))
                                 elif url == res[1]:
@@ -369,11 +379,11 @@ class Seed:
                         except KeyError:
                             res = self.tasks[url] = [False, 0]
                             pushQ.put(url)
-                    sock.send_json(res)
+                    sock.send_pyobj(res)
                 elif msg[0] == "GET_TASKS":
                     with lockTasks:
                         log.debug("GET_TASK received, sending tasks", "serve")
-                        sock.send_json(self.tasks)
+                        sock.send_pyobj(self.tasks)
                 elif msg[0] == "NEW_SEED":
                     log.debug("NEW_SEED received, saving new seed...")
                     #addr = (address, port)
@@ -393,9 +403,10 @@ class Seed:
                     sock.send_json("OK")
                 else:
                     sock.send(b"UNKNOWN")      
-            except Exception as e:
-                 #Handle connection error
+            except AssertionError as e:
+                #Handle connection error
                 log.error(e, "serve")
+                time.sleep(5)
             
 
 def main(args):

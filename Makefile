@@ -1,4 +1,6 @@
 
+folder = local_data
+
 edit: ## Open the Makefile in editor
 	code Makefile
 
@@ -16,6 +18,9 @@ worker: ## Run a scrapper with default params
 
 clean: ## Open the Makefile in editor
 	rm downloads/*
+
+%: # If command name exists in folder, it's content is copied to urls
+	cat $(folder)/$@ > urls
 
 help: ## List available commands
 	@grep -E '^[a-zA-Z_-%]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'

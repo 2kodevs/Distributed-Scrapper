@@ -1,8 +1,10 @@
-import zmq, time, re
-from util.params import urls
+import zmq, time, os, json, re
+from bs4 import BeautifulSoup
 from util.colors import GREEN, RESET
+from scrapy.http import HtmlResponse
+from urllib.parse import urljoin, urlparse
 from multiprocessing import Process, Queue
-from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds, findSeeds
+from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds, findSeeds, valid_tags, change_html
 from threading import Thread, Lock as tLock, Semaphore
 
 
@@ -10,15 +12,27 @@ log = Logger(name="Dispatcher")
 
 lockSocketReq = tLock()
 counterSocketReq = Semaphore(value=0)
+    
+    
+def writer(root, url, old, data, name, graph):
+    """
+    Write all the files on which <url> depends
+    on the <root> folder, taking their contents
+    from <data> and its name from <name>.
+    The <graph> dependency tree is traversed while 
+    there are dependencies that are not found in <old>
+    """
+    if url in old or url not in data:
+        return
+    old.add(url)
+    
+    url_name = name[url]
+    with open(f'{root}/{url_name}', 'wb') as fd:
+        fd.write(data[url])
+        
+    for next_url in graph[url]:
+        writer(root, next_url, old, data, name, graph)
 
-
-def downloadsWriter(queue):
-    for index, url, data in iter(queue.get, "STOP"):
-        with open(f"downloads/html{index}", "w") as fd:
-            log.info(f"{url} saved")
-            fd.write(data)
-    log.debug("All data saved")
-  
 
 def connectToSeeds(sock, peerQ):
     """
@@ -80,8 +94,11 @@ class Dispatcher:
     """
     Represents a client to the services of the Scrapper.
     """
-    def __init__(self, urls, uuid, address="127.0.0.1", port=4142):
-        self.urls = list(set(urls))
+    def __init__(self, urls, uuid, address="127.0.0.1", port=4142, depth=1):
+        self.depth = depth
+        self.originals = set(urls)
+        self.urls = list(self.originals)
+        self.old = {url for url in self.originals}
         self.uuid = uuid
         self.idToLog = str(uuid)[:10]
         self.address = address
@@ -151,42 +168,107 @@ class Dispatcher:
         pInput = Process(target=getSeedFromFile, name="Get seed from file", args=(seedsQ1, seedsQ2))
         pInput.start()
 
-        downloadsQ = Queue()
-        pWriter = Process(target=downloadsWriter, args=(downloadsQ,))
-        pWriter.start()
-
-        idx = {url: i for i, url in enumerate(self.urls)}
-        while len(self.urls):
-            try:
-                url = self.urls[0]
-                with counterSocketReq:
-                    socket.send_json(("URL", url))
-                    log.debug(f"send {url}", "dispatch")
-                    response = socket.recv_json()
-                assert len(response) == 2, "bad response size"
-                download, html = response
-                self.urls.pop(0)
-                if download:
+        graph = {}
+        depth = 1
+        data = {}
+        url_mapper = {url:f"url_{i}" for i, url in enumerate(self.urls)}
+        
+        src = set()
+        while True:   
+            new_data = {}
+            while len(self.urls):
+                try:
+                    url = self.urls[0]
+                    with counterSocketReq:
+                        socket.send_json(("URL", url))
+                        log.debug(f"send {url}", "dispatch")
+                        response = socket.recv_pyobj()
+                    assert len(response) == 2, "bad response size"
+                    download, html = response
                     log.debug(f"Received {download}", "dispatch")
-                    log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
-                    downloadsQ.put((idx[url], url, html))
-                else:
-                    log.debug(f"Received {download, html}", "dispatch")
-                    self.urls.append(url)
-            except AssertionError as e:
-                log.error(e, "dispatch")
-            except zmq.error.Again as e:
-                log.debug(e, "dispatch")
-            except Exception as e:
-                log.error(e, "dispatch")
-                seeds.append(seeds.pop(0))  
-            time.sleep(1)
-
+                    self.urls.pop(0)
+                    if download:
+                        log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
+                        new_data[url] = html
+                    else:
+                        self.urls.append(url)
+                except AssertionError as e:
+                    log.error(e, "dispatch")
+                except zmq.error.Again as e:
+                    log.debug(e, "dispatch")
+                except Exception as e:
+                    log.error(e, "dispatch")
+                    seeds.append(seeds.pop(0))  
+                time.sleep(1)
+                 
+            log.info(f'Depth {depth} done', 'dispatch')
+            for url, html in new_data.items():
+                graph[url] = set()
+                try:
+                    text = html.decode()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    tags = soup.find_all(valid_tags)
+                    new_urls = [['src', 'href'][tag.has_attr('href')] for tag in tags]
+                    changes = []
+                    for i, attr in enumerate(new_urls):
+                        url_dir = urljoin(url, tags[i][attr])
+                        graph[url].add(url_dir)
+                        if url_dir not in url_mapper:
+                            url_mapper[url_dir] = f'url_{len(url_mapper)}'
+                        changes.append((tags[i][attr], url_mapper[url_dir]))
+                        if attr == 'src' or tags[i].name == 'link':
+                            src.add(url_dir)
+                            continue
+                        self.urls.append(url_dir)
+                    html = change_html(text, changes).encode()
+                except UnicodeDecodeError:
+                    log.debug(f'{url} is not decodeable', 'dispatch')
+                except: # BeautifulSoup strange exceptions related with it's logger
+                    pass
+                new_data[url] = html
+            data.update(new_data)
+            self.urls = set(self.urls)
+            self.urls.difference_update(self.old)
+            self.old.update(self.urls)
+            self.urls = list(self.urls)
+            
+            if depth > self.depth:
+                break
+            if depth == self.depth:
+                src.difference_update(self.old)
+                self.old.update(src)
+                self.urls = list(src)
+            depth += 1
+            log.info(f"Number of URLs to be requested for download: {len(self.urls)}", "dispatch")
+            
+        log.info(f"Starting to write data", "dispatch")
+        for i, url in enumerate(self.originals):
+            try:
+                res = HtmlResponse(url=url, body=data[url], encoding='utf8')
+                base = res.css('title::text')[0].get()
+            except:
+                base = f"web_page_{i}"
+            try:
+                os.makedirs(f'downloads/{base}-data')
+            except:
+                pass
+            writer(f'downloads/{base}-data', url, set(), data, url_mapper, graph)   
+            
+            html = data[url]
+            if len(graph[url]) > 0:
+                text = data[url].decode()
+                changes = []
+                for dep in graph[url]:
+                    name = url_mapper[dep]
+                    changes.append((name, f'{base}-data/{name}'))
+                html = change_html(text, changes).encode()
+            with open(f'downloads/{base}', 'wb') as fd:
+                fd.write(html)
+            
         log.info(f"Dispatcher:{self.uuid} has completed his URLs succefully", "dispatch")
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
         #disconnect
 
-        downloadsQ.put("STOP")
         pWriter.join()
         queue.put(True)
         pFindSeeds.terminate()
@@ -195,9 +277,19 @@ class Dispatcher:
 def main(args):
     log.setLevel(parseLevel(args.level))
     
+    urls = []
+    try:
+        assert os.path.exists(args.urls), "No URLs to request"
+        with open(args.urls, 'r') as fd:
+            urls = json.load(fd)
+    except Exception as e:
+        log.error(e, 'main')
+        
+    log.info(urls, "main")
     uuid = makeUuid(2**55, urls)
-    d = Dispatcher(urls, uuid, args.address, args.port)
+    d = Dispatcher(urls, uuid, args.address, args.port, args.depth)
     seed = args.seed
+    
     while not d.login(seed):
         log.info("Enter an address of an existing seed node. Insert as ip_address:port_number. Press ENTER if you want to omit this address. Press q if you want to exit the program")
         seed = input("-->")
@@ -206,6 +298,7 @@ def main(args):
         seed = seed.split()[0]
         if seed == 'q':
             break
+        
     if seed != 'q':
         terminateQ = Queue()
         pDispatch = Process(target=d.dispatch, args=(terminateQ,))
@@ -222,6 +315,8 @@ if __name__ == "__main__":
     parser.add_argument('-a', '--address', type=str, default='127.0.0.1', help='node address')
     parser.add_argument('-p', '--port', type=int, default=4142, help='connection port')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
+    parser.add_argument('-d', '--depth', type=int, default=1, help='depth of recursive downloads')
+    parser.add_argument('-u', '--urls', type=str, default='urls', help='path of file that contains the urls set')
     parser.add_argument('-s', '--seed', type=str, default=None, help='address of an existing seed node. Insert as ip_address:port_number')
 
 

@@ -1,7 +1,7 @@
 import socket, logging, hashlib, random, sys, zmq, time, pickle, queue
 from util.colors import REDB, BLUEB, YELLOWB
 from util.params import format, datefmt, BROADCAST_PORT, login, localhost
-from socket import *
+from socket import socket, AF_INET, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR, SO_BROADCAST, timeout
 from multiprocessing import Process, Queue
 
 
@@ -11,13 +11,16 @@ def getIp():
     """
     return [l for l in ([ip for ip in socket.gethostbyname_ex(socket.gethostname())[2] if not ip.startswith("127.")][:1], [[(s.connect(('8.8.8.8', 53)), s.getsockname()[0], s.close()) for s in [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]][0][1]]) if l][0][0]
 
+
 def getIpOffline():
     """
     Return local ip address(works on LAN without internet).
     """
     return (([ip for ip in socket.gethostbyname_ex(socket.gethostname())[2] if not ip.startswith("127.")] or [[(s.connect(("8.8.8.8", 53)), s.getsockname()[0], s.close()) for s in [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]][0][1]]) + ["no IP found"])[0]
 
+
 def makeUuid(n, urls):
+    #//TODO: Describe this function
     name = ""
     random.shuffle(urls)
     for url in urls:
@@ -32,6 +35,9 @@ parseLevel = lambda x: getattr(logging, x)
 
 
 def LoggerFactory(name="root"):
+    '''
+    Create a custom logger to use colors in the logs
+    '''
     logging.setLoggerClass(Logger)
     logging.basicConfig(format=format, datefmt=datefmt)
     return logging.getLogger(name=name)
@@ -59,12 +65,25 @@ class Logger(logging.getLoggerClass()):
         
 
 def noBlockREQ(context, timeout=2000):
+    '''
+    Create a custom zmq.REQ socket by modifying the values of:
+    - zmq.REQ_RELAXED   to 1
+    - zmq.REQ_CORRELATE to 1
+    - zmq.RCVTIMEO      to <timeout>
+    '''
     socket = context.socket(zmq.REQ)
     socket.setsockopt(zmq.REQ_RELAXED, 1)
     socket.setsockopt(zmq.REQ_CORRELATE, 1)
     socket.setsockopt(zmq.RCVTIMEO, timeout)
     return socket
+      
         
+def valid_tags(tag):
+    '''
+    Html tags filter
+    '''
+    return tag.has_attr('href') or tag.has_attr('src')
+
 
 def discoverPeer(times, log):
         """
@@ -108,6 +127,18 @@ def discoverPeer(times, log):
         sock.close()
         
         return seed, network
+
+
+def change_html(html, changes):
+    '''
+    Function to replace a group of changes in a Html.
+    Changes have the form (old, new)
+    '''
+    changes.sort(key=lambda x: len(x[0]), reverse=True)
+    for url, name in changes:
+        html = html.replace(f'"{url}"', f'"{name}"')
+        html = html.replace(f"'{url}'", f"'{name}'")
+    return html     
 
 
 def getSeeds(seed, discoverPeer, address, login, q, log):
@@ -170,12 +201,9 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromIn
     while True:
         #random address
         seed = (localhost, 9999)
-        #to access seeds in a random mode every iteration
         data = list(seeds)
-        random.shuffle(data)
         for s in data:
             #This process is useful to know if a seed is dead too
-            seed = s
             pingQ = Queue()
             pPing = Process(target=ping, name="Ping", args=(s, pingQ, timeout, log))
             pPing.start()
@@ -185,6 +213,8 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromIn
                 for q in deadQs:
                     q.put(s)               
                 seeds.remove(s)
+            else:
+                seed = s
         seedsQ = Queue()
         pGetSeeds = Process(target=getSeeds, name="Get Seeds", args=(f"{seed[0]}:{seed[1]}", discoverPeer, None, False, seedsQ, log))
         log.debug("Finding new seeds to pull from...", "Find Seeds")
