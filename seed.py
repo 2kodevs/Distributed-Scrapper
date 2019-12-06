@@ -583,8 +583,8 @@ class Seed:
                     log.debug("GET_DATA received", "serve")
                     try:
                         rep = False
-                        if tasks[msg[1]][0] and tasks[msg[1]][1].data is not None:
-                            rep = tasks[msg[1]][1].dataQ
+                        if self.tasks[msg[1]][0] and self.tasks[msg[1]][1].data is not None:
+                            rep = self.tasks[msg[1]][1].dataQ
                     except KeyError:
                         pass
                     sock.send_pyobj(rep)
