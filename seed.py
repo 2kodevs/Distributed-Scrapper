@@ -179,12 +179,12 @@ def conitCreator(tasks, address, resultQ, toPubQ, request, package):
 
 def removeOwner(tasks, removeQ, toPubQ):
     """
-    Thread that remove owner from all conits that have it.
+    Thread that remove owner from conits that have it.
     """
     while True:
         o, url = removeQ.get()
         with lockTasks:
-            if url in tasks:
+            if url in tasks and tasks[url][0]:
                 tasks[url][1].removeOwner(o)
                 log.debug(f"Owner {o} removed from conits", "Remove Owner")
             toPubQ.put(("REMOVE", o))
