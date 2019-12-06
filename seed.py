@@ -401,6 +401,20 @@ def broadcastListener(addr, port):
             sock.sendto(pickle.dumps(("WELCOME", addr)), address)
 
 
+def cloneTasks(tasks:dict):
+    """
+    Helper function that makes a lite copy of tasks, without heavy conits.
+    """
+    liteTasks = dict()
+    for key, value in tasks.items():
+        if value[0]:
+            liteTasks[key] = value[1].copy()
+        else:
+            liteTasks[key] = value
+    log.debug(f"Lite copy of tasks created: {liteTasks}", "cloneTasks")
+    return liteTasks
+
+
 class Seed:
     """
     Represents a seed node, the node that receive and attend all client request.
@@ -561,7 +575,7 @@ class Seed:
                 elif msg[0] == "GET_TASKS":
                     with lockTasks:
                         log.debug("GET_TASK received, sending tasks", "serve")
-                        sock.send_pyobj(self.tasks)
+                        sock.send_pyobj(cloneTasks(self.tasks))
                 elif msg[0] == "NEW_SEED":
                     log.debug("NEW_SEED received, saving new seed...")
                     #addr = (address, port)
