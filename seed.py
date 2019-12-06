@@ -97,7 +97,38 @@ def workerAttender(pulledQ, resultQ, failedQ, addr):
             log.error(e, "Worker Attender")
             continue
 
-            
+
+def getData(url, owners, resultQ, removeQ):
+    """
+    Process that make a NOBLOCK request to know owners
+    of url's data.
+    """
+    context = zmq.Context()
+    sock = noBlockREQ(context, timeout=1000)
+
+    random.shuffle(owners)
+    for o in owners:
+        sock.connect(f"tcp://{o}")
+        try:
+            log.info(f"Requesting data to seed: {o}", "Get Data")
+            sock.send_pyobj(("GET_DATA", url))
+            ans = sock.recv_pyobj()
+            if ans == False:
+                #rare case that 'o' don't have the data
+                removeQ.put((o, url))
+                continue
+            #ans: (data, lives)
+            resultQ.put(ans)
+            break
+        except zmq.error.Again as e:
+            log.debug(e, "Get Data")
+            removeQ.put((o, url))
+        except Exception as e:
+            log.error(e, "Get Data")
+        finally:
+            sock.disconnect(f"tcp://{o}")
+    resultQ.put(False)        
+        
 
 def conitCreator(tasks, address, resultQ, toPubQ):
     """
@@ -493,14 +524,36 @@ class Seed:
                             res = self.tasks[url]
                             if not res[0]:
                                 if isinstance(res[1], tuple):
-                                    log.debug(f"Verificating {url} in the system...", "serve")
+                                    #log.debug(f"Verificating {url} in the system...", "serve")
                                     verificationQ.put((res[1], url))
                                 elif url == res[1]:
                                     raise KeyError
                                 else:
                                     self.tasks[url][1] += 1
                                     if self.tasks[url][1] == 10:
-                                        raise KeyError       
+                                        raise KeyError
+                            else:
+                                if res[1].data == None:
+                                    #i don't have a local replica, ask owners
+                                    getDataQ = Queue()                      
+                                    pGetData = Process(target=getData, name="Get Data", args=(url, res[1].owners, getDataQ, removeQ))
+                                    pGetData.start()
+                                    data = getDataQ.get()
+                                    pGetData.terminate()
+                                    if data:
+                                        #data: (data, lives)
+                                        log.debug(f"Hit on {url}. Total hits: {res[1].hits + 1}", "serve")
+                                        res = (True, data[0])
+                                        if res[1].hit() and res[1].tryOwn(self.repLimit):
+                                            #replicate
+                                            log.debug(f"Replicating data of {url}", "serve")
+                                            resultQ.put((False, url, data))
+                                    else:
+                                        #nobody seems to have the data
+                                        raise KeyError        
+                                else:
+                                    #I have a local replica
+                                    res = (True, res[1].data)
                         except KeyError:
                             res = self.tasks[url] = [False, 0]
                             pushQ.put(url)
@@ -526,6 +579,15 @@ class Seed:
                 elif msg[0] == "PING":
                     log.debug("PING received", "serve")
                     sock.send_json("OK")
+                elif msg[0] == "GET_DATA":
+                    log.debug("GET_DATA received", "serve")
+                    try:
+                        rep = False
+                        if tasks[msg[1]][0] and tasks[msg[1]][1].data is not None:
+                            rep = tasks[msg[1]][1].dataQ
+                    except KeyError:
+                        pass
+                    sock.send_pyobj(rep)
                 else:
                     sock.send(b"UNKNOWN")      
             except AssertionError as e:
