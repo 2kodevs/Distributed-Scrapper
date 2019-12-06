@@ -232,7 +232,7 @@ def main(args):
     s = Scrapper(port=args.port, address=args.address)
     if not s.login(args.seed):
         log.info("You are not connected to a network", "main") 
-    s.manage(2)
+    s.manage(args.workers)
 
             
 if __name__ == "__main__":
@@ -243,6 +243,8 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--port', type=int, default=5050, help='connection port')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
     parser.add_argument('-s', '--seed', type=str, default=None, help='address of a existing seed node. Insert as ip_address:port_number')
+    parser.add_argument('-w', '--workers', type=int, default=2, help='number of slaves')
+
 
     args = parser.parse_args()
 

@@ -242,6 +242,19 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromIn
 
         #//TODO: Change the amount of the sleep in production
         time.sleep(sleepTime)
+        
+        
+def run_process(target, args):
+    """
+    Run a process and return it's result.
+    """
+    ansQ = Queue()
+    args = args + (ansQ,)
+    process = Process(target=target, args=args)
+    process.start()
+    ans = ansQ.get()
+    process.terminate()
+    return ans
 
 
 def clock(cycle, q):
@@ -250,3 +263,4 @@ def clock(cycle, q):
     """
     time.sleep(cycle)
     q.put(True)
+
