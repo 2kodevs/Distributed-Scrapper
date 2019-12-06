@@ -445,7 +445,7 @@ def cloneTasks(tasks:dict):
     liteTasks = dict()
     for key, value in tasks.items():
         if value[0]:
-            liteTasks[key] = value[1].copy()
+            liteTasks[key] = (value[0], value[1].copy())
         else:
             liteTasks[key] = value
     log.debug("Lite copy of tasks created", "cloneTasks")
@@ -621,11 +621,11 @@ class Seed:
                                         self.package[id][url] = res[1].data
                                     res = (True, res[1].data)
                         except KeyError:
-                            res = self.tasks[url] = [False, 0]
+                            res = self.tasks[url] = (False, 0)
                             pushQ.put(url)
                     with lockClients:
                         res = ("RESPONSE", self.package[id])
-                        log.debug(f"Sending package of size {len(res)}", "serve")
+                        log.debug(f"Sending package of size {len(res[1])}", "serve")
                         sock.send_pyobj(res)
                         self.package[id].clear()
                 elif msg[0] == "GET_TASKS":
