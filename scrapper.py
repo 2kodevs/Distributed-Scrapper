@@ -63,7 +63,7 @@ def listener(addr, port, queue):
     socket.bind(f"tcp://{addr}:{port}")
     
     while True:
-        res = socket.recv()
+        res = socket.recv().decode()
         with lock:
             socket.send_json(res in data)
     
