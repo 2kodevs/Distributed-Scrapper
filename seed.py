@@ -517,7 +517,11 @@ class Seed:
         
         context = zmq.Context()
         sock = context.socket(zmq.REP)
-        sock.bind(f"tcp://{self.addr}:{self.port}")
+        try:
+            sock.bind(f"tcp://{self.addr}:{self.port}")
+        except Exception as e:
+            log.error(f"{e}, please check your connection, or the address", "serve")
+            return
 
         pushQ = Queue()
         pulledQ = Queue()
