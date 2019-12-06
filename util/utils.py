@@ -112,7 +112,8 @@ def discoverPeer(times, log):
                     log.debug(f"Received confirmation: {address}", "discoverPeer")
                     log.info(f"Server: {str(server)}", "discoverPeer")
                     seed = f"{server[0]}:{address[1]}"
-                    break
+                    sock.close()
+                    return seed, network
                 else:
                     log.debug("Login failed, retrying...", "discoverPeer")
             except timeout as e:

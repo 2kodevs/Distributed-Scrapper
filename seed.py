@@ -240,11 +240,10 @@ def seedManager(seeds, q):
     while True:
         cmd, address = q.get()
         with lockSeeds:
-            if cmd == "APPEND":
+            if cmd == "APPEND" and address not in seeds:
                 seeds.append(address)
-            elif cmd == "REMOVE":
-                with lockSeeds:
-                    seeds.remove(address)
+            elif cmd == "REMOVE" and address in seeds:
+                seeds.remove(address)
 
 
 def taskPublisher(addr, taskQ):
