@@ -655,7 +655,7 @@ class Seed:
                     try:
                         rep = False
                         if self.tasks[msg[1]][0] and self.tasks[msg[1]][1].data is not None:
-                            rep = self.tasks[msg[1]][1].data
+                            rep = (self.tasks[msg[1]][1].data, self.tasks[msg[1]][1].lives) 
                     except KeyError:
                         pass
                     sock.send_pyobj(rep)
