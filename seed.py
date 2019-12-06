@@ -577,7 +577,7 @@ class Seed:
                             pushQ.put(url)
                     with lockClients:
                         res = ("RESPONSE", self.package[id])
-                        log.debug(f"Sending package of")
+                        log.debug(f"Sending package of size {len(res)}")
                         sock.send_pyobj(res)
                         self.package[id].clear()
                 elif msg[0] == "GET_TASKS":
