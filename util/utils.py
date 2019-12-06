@@ -255,3 +255,12 @@ def run_process(target, args):
     ans = ansQ.get()
     process.terminate()
     return ans
+
+
+def clock(cycle, q):
+    """
+    Process that notice to the <q> Queue owner when a cycle is passed.
+    """
+    time.sleep(cycle)
+    q.put(True)
+

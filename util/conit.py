@@ -41,8 +41,23 @@ class Conit:
     
     def addLive(self):
         self.lives += 1
+        self.hits = 0
 
     
     def updateData(self, data, lives=0):
         self.data = data
         self.lives = lives
+
+
+    def copy(self):
+        """
+        Returns a copy without data.
+        """
+        conit = Conit(None, self.owners, self.limit)
+        conit.hits = self.hits
+        conit.lives = self.lives
+        return conit 
+
+
+    def isRemovable(self):
+        return self.hits < self.limit and self.lives
