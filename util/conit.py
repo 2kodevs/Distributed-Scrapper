@@ -57,3 +57,7 @@ class Conit:
         conit.hits = self.hits
         conit.lives = self.lives
         return conit 
+
+
+    def isRemovable(self):
+        return self.hits < self.limit and self.lives
