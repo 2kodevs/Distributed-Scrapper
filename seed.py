@@ -111,7 +111,7 @@ def getData(url, address, owners, resultQ, removeQ):
         sock.connect(f"tcp://{o[0]}:{o[1]}")
         try:
             log.info(f"Requesting data to seed: {o}", "Get Data")
-            sock.send_pyobj(("GET_DATA", url))
+            sock.send_json(("GET_DATA", url))
             ans = sock.recv_pyobj()
             if ans == False:
                 #rare case that 'o' don't have the data
