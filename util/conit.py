@@ -46,3 +46,12 @@ class Conit:
     def updateData(self, data, lives=0):
         self.data = data
         self.lives = lives
+
+    def copy(self):
+        """
+        Returns a copy without data.
+        """
+        conit = Conit(None, self.owners, self.limit)
+        conit.hits = self.hits
+        conit.lives = self.lives
+        return conit 
