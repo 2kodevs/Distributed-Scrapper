@@ -14,6 +14,7 @@ lockTasks = tLock()
 lockSubscriber = tLock()
 lockSeeds = tLock()
 lockOwners = tLock()
+lockClients = tLock()
 
 
 def verificator(queue, t, pushQ):
@@ -130,7 +131,7 @@ def getData(url, owners, resultQ, removeQ):
     resultQ.put(False)        
         
 
-def conitCreator(tasks, address, resultQ, toPubQ):
+def conitCreator(tasks, address, resultQ, toPubQ, request, package):
     """
     Thread that manage conit creation.
     """
@@ -170,8 +171,13 @@ def conitCreator(tasks, address, resultQ, toPubQ):
                 #it comes from dispatch, Replicate data
                 log.debug(f"Replicating data of {url}...", "Conit Creator")
                 tasks[url][1].updateData(data[0], data[1])
+                data = data[0]
                 tasks[url][1].addOwner(address)
                 toPubQ.put((flag, url, ("NEW_DATA", address)))
+            with lockClients:
+                for id in request[url]:
+                    log.error(f"adding {url} to {id}", 'Conit Creator')
+                    package[id][url] = data
                     
 
 def removeOwner(tasks, removeQ):
@@ -411,6 +417,8 @@ class Seed:
         self.repLimit = repLimit
         self.seeds = [(address, port)]
         self.owners = dict()
+        self.package = dict()
+        self.request = dict()
 
         log.debug(f"Seed node created with address:{address}:{port}", pMainLog)
 
@@ -485,14 +493,14 @@ class Seed:
         pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, failedQ, f"{self.addr}:{self.port + 2}"))
         pTaskPublisher = Process(target=taskPublisher, name="Task Publisher", args=(f"{self.addr}:{self.port + 3}", taskToPubQ))
         pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.addr, self.port, seedsQ, resultQ, newSeedsQ, dataQ))
-        pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 800, pushQ))
+        pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 500, pushQ))
         pListener = Process(target=broadcastListener, name="Broadcast Listener", args=((self.addr, self.port), broadcastPort))
 
         taskManager1T = Thread(target=taskManager, name="Task Manager - PULLED", args=(self.tasks, pulledQ, taskToPubQ, True))
         taskManager2T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
         seedManagerT = Thread(target=seedManager, name="Seed Manager", args=(self.seeds, newSeedsQ))
         resourceManagerT = Thread(target=resourceManager, name="Resource Manager", args=(self.owners, self.tasks, dataQ))
-        conitCreatorT = Thread(target=conitCreator, name="Conit Creator", args=(self.tasks, (self.addr, self.port), resultQ, taskToPubQ))
+        conitCreatorT = Thread(target=conitCreator, name="Conit Creator", args=(self.tasks, (self.addr, self.port), resultQ, taskToPubQ, self.request, self.package))
         removeOwnerT = Thread(target=removeOwner, name="Remove Owner", args=(self.owners, removeQ))
         purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 3000000))
 
@@ -518,7 +526,13 @@ class Seed:
             try:
                 msg = sock.recv_json()
                 if msg[0] == "URL":
-                    url = msg[1]
+                    _, id, url = msg
+                    with lockClients:
+                        if url not in self.request:
+                            self.request[url] = set()
+                        self.request[url].add(id)
+                        if id not in self.package:
+                            self.package[id] = dict()
                     with lockTasks:
                         try:
                             res = self.tasks[url]
@@ -544,6 +558,8 @@ class Seed:
                                         #data: (data, lives)
                                         log.debug(f"Hit on {url}. Total hits: {res[1].hits + 1}", "serve")
                                         res = (True, data[0])
+                                        with lockClients:
+                                            self.package[id][url] = data[0]
                                         if res[1].hit() and res[1].tryOwn(self.repLimit):
                                             #replicate
                                             log.debug(f"Replicating data of {url}", "serve")
@@ -553,11 +569,17 @@ class Seed:
                                         raise KeyError        
                                 else:
                                     #I have a local replica
+                                    with lockClients:
+                                        self.package[id][url] = res[1].data
                                     res = (True, res[1].data)
                         except KeyError:
                             res = self.tasks[url] = [False, 0]
                             pushQ.put(url)
-                    sock.send_pyobj(res)
+                    with lockClients:
+                        res = ("RESPONSE", self.package[id])
+                        log.debug(f"Sending package of")
+                        sock.send_pyobj(res)
+                        self.package[id].clear()
                 elif msg[0] == "GET_TASKS":
                     with lockTasks:
                         log.debug("GET_TASK received, sending tasks", "serve")
@@ -584,7 +606,7 @@ class Seed:
                     try:
                         rep = False
                         if self.tasks[msg[1]][0] and self.tasks[msg[1]][1].data is not None:
-                            rep = self.tasks[msg[1]][1].dataQ
+                            rep = self.tasks[msg[1]][1].data
                     except KeyError:
                         pass
                     sock.send_pyobj(rep)
