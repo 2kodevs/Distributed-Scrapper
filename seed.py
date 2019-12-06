@@ -105,10 +105,8 @@ def getData(url, address, owners, resultQ, removeQ):
     context = zmq.Context()
     sock = noBlockREQ(context, timeout=1000)
 
-    tempOwners = owners.copy()
-    tempOwners.remove(address)
-    random.shuffle(tempOwners)
-    for o in tempOwners:
+    random.shuffle(owners)
+    for o in owners:
         sock.connect(f"tcp://{o}")
         try:
             log.info(f"Requesting data to seed: {o}", "Get Data")
