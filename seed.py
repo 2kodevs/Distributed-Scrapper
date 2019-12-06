@@ -549,7 +549,7 @@ class Seed:
         seedManagerT = Thread(target=seedManager, name="Seed Manager", args=(self.seeds, newSeedsQ))
         resourceManagerT = Thread(target=resourceManager, name="Resource Manager", args=(self.owners, self.tasks, dataQ))
         conitCreatorT = Thread(target=conitCreator, name="Conit Creator", args=(self.tasks, (self.addr, self.port), resultQ, taskToPubQ, self.request, self.package))
-        removeOwnerT = Thread(target=removeOwner, name="Remove Owner", args=(self.owners, removeQ))
+        removeOwnerT = Thread(target=removeOwner, name="Remove Owner", args=(self.owners, removeQ, taskToPubQ))
         purgerT = Thread(target=purger, name="Purger", args=(self.tasks, (self.addr, self.port), 1200, taskToPubQ, purgeQ)) #20 minutes
 
         pPush.start()
