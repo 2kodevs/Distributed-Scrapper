@@ -621,7 +621,7 @@ class Seed:
                                         self.package[id][url] = res[1].data
                                     res = (True, res[1].data)
                         except KeyError:
-                            res = self.tasks[url] = (False, 0)
+                            res = self.tasks[url] = [False, 0]
                             pushQ.put(url)
                     with lockClients:
                         res = ("RESPONSE", self.package[id])
