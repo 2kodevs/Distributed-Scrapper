@@ -607,13 +607,13 @@ class Seed:
                     try:
                         rep = False
                         if self.tasks[msg[1]][0] and self.tasks[msg[1]][1].data is not None:
-                            rep = self.tasks[msg[1]][1].dataQ
+                            rep = self.tasks[msg[1]][1].data
                     except KeyError:
                         pass
                     sock.send_pyobj(rep)
                 else:
                     sock.send(b"UNKNOWN")      
-            except AssertionError as e:
+            except Exception as e:
                 #Handle connection error
                 log.error(e, "serve")
                 time.sleep(5)
