@@ -598,7 +598,7 @@ class Seed:
 
 def main(args):
     log.setLevel(parseLevel(args.level))
-    s = Seed(args.address, args.port)
+    s = Seed(args.address, args.port, args.replication_limit)
     if not s.login(args.seed):
         log.info("You are not connected to a network", "main") 
     s.serve(args.broadcast_port)
@@ -613,6 +613,7 @@ if __name__ == "__main__":
     parser.add_argument('-b', '--broadcast_port', type=int, default=BROADCAST_PORT, help='broadcast listener port (Default: 4142)')
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
     parser.add_argument('-s', '--seed', type=str, default=None, help='address of a existing seed node. Insert as ip_address:port_number')
+    parser.add_argument('-r', '--replication_limit', type=int, default=2, help='maximum number of times that you want data to be replicated')
 
     args = parser.parse_args()
 
