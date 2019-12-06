@@ -179,27 +179,34 @@ class Dispatcher:
             while len(self.urls):
                 try:
                     url = self.urls[0]
+                    self.urls.pop(0)
+                    self.urls.append(url)
                     with counterSocketReq:
-                        socket.send_json(("URL", url))
+                        socket.send_json(("URL", self.uuid, url))
                         log.debug(f"send {url}", "dispatch")
                         response = socket.recv_pyobj()
+                    assert isinstance(response, tuple), f"Bad response, expected <tuple> find {type(response)}"
                     assert len(response) == 2, "bad response size"
-                    download, html = response
-                    log.debug(f"Received {download}", "dispatch")
-                    self.urls.pop(0)
-                    if download:
-                        log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
-                        new_data[url] = html
-                    else:
-                        self.urls.append(url)
+                    assert response[0] == 'RESPONSE', "Unexpected response format"
+                    _, package = response
+                    log.info(f"Received a package with size: {len(package)}", "dispatch")
+                    for recv_url, html in package.items():
+                        try:
+                            idx = self.urls.index(recv_url)
+                            log.info(f"{recv_url} {GREEN}OK{RESET}", "dispatch")
+                            new_data[recv_url] = html
+                            self.urls.pop(idx)
+                        except ValueError:
+                            log.debug(f'Unnecesary {recv_url}', 'dispatch')
                 except AssertionError as e:
                     log.error(e, "dispatch")
                 except zmq.error.Again as e:
                     log.debug(e, "dispatch")
                 except Exception as e:
                     log.error(e, "dispatch")
-                    seeds.append(seeds.pop(0))  
-                time.sleep(1)
+                    # That line is currently necessary?
+                    # seeds.append(seeds.pop(0))  
+                time.sleep(0.8)
                  
             log.info(f'Depth {depth} done', 'dispatch')
             for url, html in new_data.items():
