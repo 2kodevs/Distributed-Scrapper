@@ -58,6 +58,7 @@ def listener(addr, port, queue):
                     
     data = []
     thread = Thread(target=puller, args=(queue, data))
+    thread.start()
     socket = zmq.Context().socket(zmq.REP)
     socket.bind(f"tcp://{addr}:{port}")
     

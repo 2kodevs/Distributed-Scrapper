@@ -225,6 +225,8 @@ def taskManager(tasks, q, toPubQ, pub):
     while True:
         flag, url, data = q.get()
         with lockTasks:
+            if url in tasks and tasks[url][0]:
+                continue
             tasks[url] = (flag, data)
             #publish to other seeds
             if pub:
