@@ -12,7 +12,6 @@ log = Logger(name="Seed")
 lockTasks = tLock()
 lockSubscriber = tLock()
 lockSeeds = tLock()
-lockOwners = tLock()
 lockClients = tLock()
 
 
@@ -191,17 +190,7 @@ def removeOwner(tasks, removeQ, toPubQ):
             toPubQ.put(("REMOVE", o))
 
 
-def updateOwners(owners, conit, owner):
-    """
-    Helper function that update owners dict.
-    """
-    try:
-        owners[owner].add(conit)
-    except KeyError:
-        owners[owner] = {conit}
-
-
-def resourceManager(owners, tasks, dataQ):
+def resourceManager(tasks, dataQ):
     """
     Thread that manage publications of seed nodes
     related to downloaded data.
@@ -217,20 +206,15 @@ def resourceManager(owners, tasks, dataQ):
                     if tasks[url][1].data is not None:
                         tasks[url][1].updateData(data[0])
                     tasks[url][1].addOwner(data[1])
-                    with lockOwners:
-                        updateOwners(owners, tasks[url][1], data[1])
                 elif header == "UPDATE":
                     log.debug(f"Updating data of {url}...", "Resource Manager")
                     tasks[url][1].updateData(data)
                 elif header == "NEW_DATA":
-                    log.debug(f"Updating owners of {url}...", "Resource Manager")
                     tasks[url][1].addOwner(data)
-                    with lockOwners:
-                        updateOwners(owners, tasks[url][1], data)
             except KeyError:
                 if header == "FORCED":
                     tasks[url] = (True, Conit(None, [data[1]]))
-                else:
+                elif header == "NEW_DATA":
                     tasks[url] = (True, Conit(None, [data]))
 
 
@@ -461,7 +445,6 @@ class Seed:
         self.port = port
         self.repLimit = repLimit
         self.seeds = [(address, port)]
-        self.owners = dict()
         self.package = dict()
         self.request = dict()
 
@@ -551,9 +534,9 @@ class Seed:
         taskManager1T = Thread(target=taskManager, name="Task Manager - PULLED", args=(self.tasks, pulledQ, taskToPubQ, True))
         taskManager2T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
         seedManagerT = Thread(target=seedManager, name="Seed Manager", args=(self.seeds, newSeedsQ))
-        resourceManagerT = Thread(target=resourceManager, name="Resource Manager", args=(self.owners, self.tasks, dataQ))
+        resourceManagerT = Thread(target=resourceManager, name="Resource Manager", args=(self.tasks, dataQ))
         conitCreatorT = Thread(target=conitCreator, name="Conit Creator", args=(self.tasks, (self.addr, self.port), resultQ, taskToPubQ, self.request, self.package))
-        removeOwnerT = Thread(target=removeOwner, name="Remove Owner", args=(self.owners, removeQ, taskToPubQ))
+        removeOwnerT = Thread(target=removeOwner, name="Remove Owner", args=(removeQ, taskToPubQ))
         purgerT = Thread(target=purger, name="Purger", args=(self.tasks, (self.addr, self.port), 1200, taskToPubQ, purgeQ)) #20 minutes
 
         pPush.start()
@@ -661,6 +644,7 @@ class Seed:
                             rep = (self.tasks[msg[1]][1].data, self.tasks[msg[1]][1].lives) 
                     except KeyError:
                         pass
+                    log.debug("Sending response to GET_DATA")
                     sock.send_pyobj(rep)
                 else:
                     sock.send_pyobj("UNKNOWN")      
