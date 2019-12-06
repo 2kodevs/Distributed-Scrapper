@@ -334,7 +334,7 @@ def taskSubscriber(peerQ, disconnectQ, taskQ, seedQ, dataQ, purgeQ):
 
     disconnectT = Thread(target=disconnectFromPublishers, name="Disconnect from Publishers", args=(sock, disconnectQ))
     disconnectT.start()
-    
+
     time.sleep(1)
 
     while True:
@@ -637,7 +637,7 @@ class Seed:
                     #addr = (address, port)
                     addr = tuple(msg[1])
                     with lockSeeds:
-                        if addr is not in self.seeds:
+                        if addr not in self.seeds:
                             self.seeds.append(addr)
                             seedsQ.put(addr)
                             taskToPubQ.put(addr)
@@ -664,8 +664,6 @@ class Seed:
             except Exception as e:
                 #Handle connection error
                 log.error(e, "serve")
-                if e == "Operation cannot be accomplished in current state":
-                    sock.send_pyobj("UNKNOWN")
                 time.sleep(5)
             
 
