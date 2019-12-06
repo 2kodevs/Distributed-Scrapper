@@ -17,7 +17,7 @@ counterSocketPull = Semaphore(value=0)
 counterSocketNotifier = Semaphore(value=0)
 
 
-def slave(tasks, notifications, idx):
+def slave(tasks, notifications, idx, verifyQ):
     """
     Child Process of Scrapper, responsable of downloading the urls.
     """
@@ -36,21 +36,35 @@ def slave(tasks, notifications, idx):
                     notifications.put(("FAILED", url, i))
                 continue
             notifications.put(("DONE", url, response.content))
+            verifyQ.put((False, url))
             break
         with availableSlaves:
             availableSlaves.value += 1
     
 
-def listener(addr, port):
+def listener(addr, port, queue, data):
     """
     Process to attend the verification messages sent by the seed.
     """
+    
+    lock = tLock()
+    def puller(q, l):
+        for flag, url in iter(q.get, "STOP"):
+            with lock:
+                if flag:
+                    l.append(url)
+                else:
+                    l.remove(url)
+                    
+    data = []
+    thread = Thread(target=puller, args=(queue, data))
     socket = zmq.Context().socket(zmq.REP)
     socket.bind(f"tcp://{addr}:{port}")
     
     while True:
         res = socket.recv()
-        socket.send_json(True)
+        with lock:
+            socket.send_json(res in data)
     
 
 def connectToSeeds(sock, inc, lock, counter, peerQ, user):
@@ -180,6 +194,7 @@ class Scrapper:
         connectT = Thread(target=connectToSeeds, name="Connect to Seeds - Pull", args=(socketPull, 1, lockSocketPull, counterSocketPull, seedsQ1, "Pull"))
         connectT.start()
 
+        pendingQ = Queue()
         toDisconnectQ1 = Queue()
         toDisconnectQ2 = Queue()
 
@@ -194,14 +209,14 @@ class Scrapper:
         pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQ, seedsQ2, toDisconnectQ2))
         pNotifier.start()
         
-        pListen = Process(target=listener, name="pListen", args=(self.addr, self.port))
-        pListen.start()
+        listenT = Process(target=listener, name="pListen", args=(self.addr, self.port))
+        listenT.start()
         
         taskQ = Queue()
         log.info(f"Scrapper starting child process", "manage")
         availableSlaves.value = slaves
         for i in range(slaves):
-            p = Process(target=slave, args=(taskQ, notificationsQ, i))
+            p = Process(target=slave, args=(taskQ, notificationsQ, i, pendingQ))
             p.start()
             log.debug(f"Scrapper has started a child process with pid:{p.pid}", "manage")
 
@@ -218,6 +233,7 @@ class Scrapper:
                                 url = socketPull.recv(flags=zmq.NOBLOCK).decode()
                         taskQ.put(url)
                         notificationsQ.put(("PULLED", url, addr))
+                        pendingQ.put((True, url))
                         log.debug(f"Pulled {url} in scrapper", "manage")
             except zmq.error.ZMQError as e:
                 log.debug(f"No new messages to pull: {e}", "manage")
