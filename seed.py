@@ -97,7 +97,7 @@ def workerAttender(pulledQ, resultQ, failedQ, addr):
             continue
 
 
-def getData(url, owners, resultQ, removeQ):
+def getData(url, address, owners, resultQ, removeQ):
     """
     Process that make a NOBLOCK request to know owners
     of url's data.
@@ -105,8 +105,10 @@ def getData(url, owners, resultQ, removeQ):
     context = zmq.Context()
     sock = noBlockREQ(context, timeout=1000)
 
-    random.shuffle(owners)
-    for o in owners:
+    tempOwners = owners.copy()
+    tempOwners.remove(address)
+    random.shuffle(tempOwners)
+    for o in tempOwners:
         sock.connect(f"tcp://{o}")
         try:
             log.info(f"Requesting data to seed: {o}", "Get Data")
@@ -559,7 +561,7 @@ class Seed:
                                 if res[1].data == None:
                                     #i don't have a local replica, ask owners
                                     getDataQ = Queue()                      
-                                    pGetData = Process(target=getData, name="Get Data", args=(url, res[1].owners, getDataQ, removeQ))
+                                    pGetData = Process(target=getData, name="Get Data", args=(url, (self.addr, self.port), res[1].owners, getDataQ, removeQ))
                                     pGetData.start()
                                     data = getDataQ.get()
                                     pGetData.terminate()
