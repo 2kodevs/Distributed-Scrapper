@@ -178,7 +178,7 @@ def conitCreator(tasks, address, resultQ, toPubQ, request, package):
                         package[id][url] = data
                     
 
-def removeOwner(tasks, removeQ):
+def removeOwner(tasks, removeQ, toPubQ):
     """
     Thread that remove owner from all conits that have it.
     """
@@ -188,7 +188,7 @@ def removeOwner(tasks, removeQ):
             if url in tasks:
                 tasks[url][1].removeOwner(o)
                 log.debug(f"Owner {o} removed from conits", "Remove Owner")
-            #//TODO: Publish this removal
+            toPubQ.put(("REMOVE", o))
 
 
 def updateOwners(owners, conit, owner):
@@ -228,7 +228,6 @@ def resourceManager(owners, tasks, dataQ):
                     with lockOwners:
                         updateOwners(owners, tasks[url][1], data)
             except KeyError:
-                #//HACK: is possible that u don't have that entry in tasks
                 if header == "FORCED":
                     tasks[url] = (True, Conit(None, [data[1]]))
                 else:
@@ -258,8 +257,8 @@ def seedManager(seeds, q):
             if cmd == "APPEND":
                 seeds.append(address)
             elif cmd == "REMOVE":
-                #//TODO: Make pipeline for remove a seed from seeds list when a seed is detected dead
-                seeds.remove(address)
+                with lockSeeds:
+                    seeds.remove(address)
 
 
 def taskPublisher(addr, taskQ):
@@ -286,6 +285,9 @@ def taskPublisher(addr, taskQ):
             elif task[0] == "PURGE":
                 log.debug(f"Publish PURGE", "Task Publisher")
                 sock.send_multipart([b"PURGE", b"JUNK"])
+            elif task[0] == "REMOVE":
+                log.debug(f"Publish REMOVE", "Task Publisher")
+                sock.send_multipart([b"REMOVE", pickle.dumps(task[1])])
             else:
                 log.debug(f"Publish seed: ({task[0]}:{task[1]})", "Task Publisher")
                 sock.send_multipart([b"NEW_SEED", pickle.dumps(task)])
@@ -303,7 +305,17 @@ def connectToPublishers(sock, peerQ):
             sock.connect(f"tcp://{addr}:{port + 3}")
 
 
-def taskSubscriber(peerQ, taskQ, seedQ, dataQ, purgeQ):
+def disconnectFromPublishers(sock, peerQ):
+    """
+    Thread that disconnect subscriber socket from seeds.
+    """
+    for addr, port in iter(peerQ.get, "STOP"):
+        with lockSubscriber:
+            log.debug(f"Disconnecting from seed {addr}:{port + 3}","Disconnect from Publishers")
+            sock.disconnect(f"tcp://{addr}:{port + 3}")
+
+
+def taskSubscriber(peerQ, disconnectQ, taskQ, seedQ, dataQ, purgeQ):
     """
     Process that subscribe to published tasks
     """
@@ -314,11 +326,15 @@ def taskSubscriber(peerQ, taskQ, seedQ, dataQ, purgeQ):
     sock.setsockopt(zmq.SUBSCRIBE, b"UPDATE")
     sock.setsockopt(zmq.SUBSCRIBE, b"NEW_DATA")
     sock.setsockopt(zmq.SUBSCRIBE, b"FORCED")
+    sock.setsockopt(zmq.SUBSCRIBE, b"REMOVE")
     sock.setsockopt(zmq.SUBSCRIBE, b"PURGE")
 
-    #//TODO: Create a disconnectToPublishers
     connectT = Thread(target=connectToPublishers, name="Connect to Publishers", args=(sock, peerQ))
     connectT.start()
+
+    disconnectT = Thread(target=disconnectFromPublishers, name="Disconnect from Publishers", args=(sock, disconnectQ))
+    disconnectT.start()
+    
     time.sleep(1)
 
     while True:
@@ -337,7 +353,10 @@ def taskSubscriber(peerQ, taskQ, seedQ, dataQ, purgeQ):
                     seedQ.put(("APPEND", (addr, port)))
                     peerQ.put((addr, port))
                 elif header == "REMOVE":
-                    pass
+                    #task: (address, port)
+                    addr, port = pickle.loads(task)
+                    seedQ.put(("REMOVE", (addr, port)))
+                    disconnectQ.put((addr, port))
                 elif header == "PURGE":
                     purgeQ.put(False)
                 else:
@@ -505,6 +524,7 @@ class Seed:
         resultQ = Queue()
         taskToPubQ = Queue()
         seedsQ = Queue()
+        disconnectQ = Queue()
         verificationQ = Queue()
         failedQ = Queue()
         newSeedsQ = Queue()
@@ -520,7 +540,7 @@ class Seed:
         pPush = Process(target=pushTask, name="Task Pusher", args=(pushQ, f"{self.addr}:{self.port + 1}"))
         pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, failedQ, f"{self.addr}:{self.port + 2}"))
         pTaskPublisher = Process(target=taskPublisher, name="Task Publisher", args=(f"{self.addr}:{self.port + 3}", taskToPubQ))
-        pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(seedsQ, failedQ, newSeedsQ, dataQ, purgeQ))
+        pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(seedsQ, disconnectQ, failedQ, newSeedsQ, dataQ, purgeQ))
         pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 500, pushQ))
         pListener = Process(target=broadcastListener, name="Broadcast Listener", args=((self.addr, self.port), broadcastPort))
 
@@ -617,9 +637,10 @@ class Seed:
                     #addr = (address, port)
                     addr = tuple(msg[1])
                     with lockSeeds:
-                        self.seeds.append(addr)
-                    seedsQ.put(addr)
-                    taskToPubQ.put(addr)
+                        if addr is not in self.seeds:
+                            self.seeds.append(addr)
+                            seedsQ.put(addr)
+                            taskToPubQ.put(addr)
                     sock.send_json("OK")
                 elif msg[0] == "GET_SEEDS":
                     log.debug("GET_SEEDS received, sending seeds", "serve")
