@@ -42,7 +42,7 @@ def slave(tasks, notifications, idx, verifyQ):
             availableSlaves.value += 1
     
 
-def listener(addr, port, queue, data):
+def listener(addr, port, queue):
     """
     Process to attend the verification messages sent by the seed.
     """
@@ -209,7 +209,7 @@ class Scrapper:
         pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQ, seedsQ2, toDisconnectQ2))
         pNotifier.start()
         
-        listenT = Process(target=listener, name="pListen", args=(self.addr, self.port))
+        listenT = Process(target=listener, name="pListen", args=(self.addr, self.port, pendingQ))
         listenT.start()
         
         taskQ = Queue()
