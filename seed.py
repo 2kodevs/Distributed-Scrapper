@@ -185,8 +185,9 @@ def removeOwner(tasks, removeQ):
     while True:
         o, url = removeQ.get()
         with lockTasks:
-            tasks[url][1].removeOwner(o)
-            log.debug(f"Owner {o} removed from conits", "Remove Owner")
+            if url in tasks:
+                tasks[url][1].removeOwner(o)
+                log.debug(f"Owner {o} removed from conits", "Remove Owner")
             #//TODO: Publish this removal
 
 
