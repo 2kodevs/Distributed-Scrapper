@@ -41,11 +41,13 @@ class Conit:
     
     def addLive(self):
         self.lives += 1
+        self.hits = 0
 
     
     def updateData(self, data, lives=0):
         self.data = data
         self.lives = lives
+
 
     def copy(self):
         """
