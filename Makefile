@@ -19,7 +19,7 @@ worker: ## Run a scrapper with default params
 clean: ## Open the Makefile in editor
 	rm downloads/*
 
-%: # If command name exists in folder, it's content is copied to urls
+%: ## If command name exists in folder, it's content is copied to urls
 	cat $(folder)/$@ > urls
 
 help: ## List available commands

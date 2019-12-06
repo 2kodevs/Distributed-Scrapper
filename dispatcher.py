@@ -269,9 +269,9 @@ class Dispatcher:
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
         #disconnect
 
-        pWriter.join()
         queue.put(True)
         pFindSeeds.terminate()
+        pInput.terminate()
         
         
 def main(args):
