@@ -2,12 +2,12 @@ class Conit:
     """
     Consistency unit, keep a resource and some metrics.
     """
-    def __init__(self, data, limit=5, owner=None):
+    def __init__(self, data, owners, limit=5):
         self.data = data
         self.hits = 0
         self.lives = 0
         self.limit = limit
-        self.owners = list() if owner is None else [owner]
+        self.owners = owners
 
     
     def hit(self):
@@ -30,12 +30,19 @@ class Conit:
 
 
     def addOwner(self, owner):
-        self.owners.append(owner)
+        if owner not in self.owners:
+            self.owners.append(owner)
 
     
     def removeOwner(self, owner):
-        self.owners.remove(owner)
+        if owner in self.owners:
+            self.owners.remove(owner)
 
     
-    def addLive(self)
+    def addLive(self):
         self.lives += 1
+
+    
+    def updateData(self, data, lives=0):
+        self.data = data
+        self.lives = lives

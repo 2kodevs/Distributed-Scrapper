@@ -1,4 +1,5 @@
-import zmq, time, queue, pickle, re
+import zmq, time, queue, pickle, re, random
+from util.conit import Conit
 from multiprocessing import Process, Queue
 from threading import Thread, Lock as tLock
 from util.params import login, BROADCAST_PORT
@@ -12,6 +13,7 @@ pMainLog = "main"
 lockTasks = tLock()
 lockSubscriber = tLock()
 lockSeeds = tLock()
+lockOwners = tLock()
 
 
 def verificator(queue, t, pushQ):
@@ -96,6 +98,104 @@ def workerAttender(pulledQ, resultQ, failedQ, addr):
             continue
 
             
+
+def conitCreator(tasks, address, resultQ, toPubQ):
+    """
+    Thread that manage conit creation.
+    """
+    while True:
+        flag, url, data = resultQ.get()
+        log.error(f"There is a task!!!!! ({flag}, {url})", "Conit Creator")
+        with lockTasks:
+            log.error("Lock acquired", "Conit Creator")
+            if flag:
+                #it comes from workerAttender
+                if url in tasks and tasks[url][0]:
+                    if tasks[url][1].data is not None:
+                        #I have an old copy, update data
+                        log.debug(f"Updating data with url: {url}", "Conit Creator")
+                        cnit = tasks[url][1]
+                        cnit.updateData(data)
+                        #UPDATE: call your conit's updateData with data
+                        toPubQ.put((flag, url, ("UPDATE", data)))
+                    else:
+                        #I have the list of owners, but force replication of data, this is a rare case
+                        log.debug(f"Forcing to save data with url: {url}", "Conit Creator")
+                        cnit = tasks[url][1]
+                        cnit.updateData(data)
+                        cnit.addOwner(address)
+                        #FORCED: call your conit's updateData with data (in case of having a replica)
+                        #and update owners
+                        toPubQ.put((flag, url, ("FORCED", (data, address))))
+                else:
+                    #it seems that nobody have it. Save data
+                    log.debug(f"Saving data with url: {url}", "Conit Creator")
+                    #//TODO: Parameterize param limit of Conit constructor
+                    cnit = Conit(data, owners=[address])
+                    tasks[url] = (True, cnit)
+                    #NEW_DATA: update owners of url's data with address
+                    toPubQ.put((flag, url, ("NEW_DATA", address)))
+            else:
+                #it comes from dispatch, Replicate data
+                log.debug(f"Replicating data of {url}...", "Conit Creator")
+                tasks[url][1].updateData(data[0], data[1])
+                tasks[url][1].addOwner(address)
+                toPubQ.put((flag, url, ("NEW_DATA", address)))
+                    
+
+def removeOwner(tasks, removeQ):
+    """
+    Thread that remove owner from all conits that have it.
+    """
+    while True:
+        o, url = removeQ.get()
+        with lockTasks:
+            tasks[url][1].removeOwner(o)
+            log.debug(f"Owner {o} removed from conits", "Remove Owner")
+
+
+def updateOwners(owners, conit, owner):
+    """
+    Helper function that update owners dict.
+    """
+    try:
+        owners[owner].add(conit)
+    except KeyError:
+        owners[owner] = {conit}
+
+
+def resourceManager(owners, tasks, dataQ):
+    """
+    Thread that manage publications of seed nodes
+    related to downloaded data.
+    """
+    while True:
+        header, task = dataQ.get()
+        url, data = task
+        with lockTasks:
+            try:
+                if header == "FORCED":
+                    if tasks[url][1].data is not None:
+                        tasks[url][1].updateData(data[0])
+                    tasks[url][1].addOwner(data[1])
+                    with lockOwners:
+                        updateOwners(owners, tasks[url][1], data[1])
+                elif header == "UPDATE":
+                    log.debug(f"Updating data of {url}...", "Resource Manager")
+                    tasks[url][1].updateData(data)
+                elif header == "NEW_DATA":
+                    log.debug(f"Updating owners of {url}...", "Resource Manager")
+                    tasks[url][1].addOwner(data)
+                    with lockOwners:
+                        updateOwners(owners, tasks[url][1], data)
+            except KeyError:
+                #//HACK: is possible that u don't have that entry in tasks
+                if header == "FORCED":
+                    tasks[url] = Conit(None, [data[1]])
+                else:
+                    tasks[url] = Conit(None, [data])
+
+
 def taskManager(tasks, q, toPubQ, pub):
     """
     Thread that helps the seed main process to update the tasks map.
@@ -136,8 +236,14 @@ def taskPublisher(addr, taskQ):
             #task: (flag, url, data)
             task = taskQ.get()
             if isinstance(task[0], bool):
-                log.debug(f"Publish task: ({task[0]}, {task[1]})", "Task Publisher")
-                sock.send_multipart([b"TASK", pickle.dumps(task)])
+                if isinstance(task[2][1], int):
+                    log.debug(f"Publish pulled task: ({task[0]}, {task[1]})", "Task Publisher")
+                    sock.send_multipart([b"PULLED_TASK", pickle.dumps(task)])
+                    continue
+
+                header = task[2][0]
+                log.debug(f"Publish {header} of {task[1]}", "Task Publisher")
+                sock.send_multipart([header.encode(), pickle.dumps((task[1], task[2][1]))])
             else:
                 log.debug(f"Publish seed: ({task[0]}:{task[1]})", "Task Publisher")
                 sock.send_multipart([b"NEW_SEED", pickle.dumps(task)])
@@ -155,15 +261,19 @@ def connectToPublishers(sock, peerQ):
             sock.connect(f"tcp://{addr}:{port + 3}")
 
 
-def taskSubscriber(addr, port, peerQ, taskQ, seedQ):
+def taskSubscriber(addr, port, peerQ, taskQ, seedQ, dataQ):
     """
     Process that subscribe to published tasks
     """
     context = zmq.Context()
     sock = context.socket(zmq.SUB)
-    sock.setsockopt(zmq.SUBSCRIBE, b"TASK")
+    sock.setsockopt(zmq.SUBSCRIBE, b"PULLED_TASK")
     sock.setsockopt(zmq.SUBSCRIBE, b"NEW_SEED")
+    sock.setsockopt(zmq.SUBSCRIBE, b"UPDATE")
+    sock.setsockopt(zmq.SUBSCRIBE, b"NEW_DATA")
+    sock.setsockopt(zmq.SUBSCRIBE, b"FORCED")
 
+    #//TODO: Create a disconnectToPublishers
     connectT = Thread(target=connectToPublishers, name="Connect to Publishers", args=(sock, peerQ))
     connectT.start()
     time.sleep(1)
@@ -172,17 +282,24 @@ def taskSubscriber(addr, port, peerQ, taskQ, seedQ):
         try:
             with lockSubscriber:
                 header, task = sock.recv_multipart()
+                header = header.decode()
                 log.debug(f"Received Subscribed message: {header.decode()}", "Task Subscriber")
-                if header == "TASK":
+                if header == "PULLED_TASK":
                     #task: (flag, url, data)
                     flag, url, data = pickle.loads(task)
                     taskQ.put((flag, url, data))
-                else:
+                elif header == "APPEND":
                     #task: (address, port)
                     addr, port = pickle.loads(task)
                     seedQ.put(("APPEND", (addr, port)))
                     peerQ.put((addr, port))
-                    
+                elif header == "REMOVE":
+                    pass
+                else:
+                    #header: UPDATE, NEW_DATA, FORCED
+                    #task: (url, data)
+                    task = pickle.loads(task)
+                    dataQ.put((header, task))
         except Exception as e:
             log.error(e, "Task Subscriber")
 
@@ -257,10 +374,12 @@ class Seed:
     """
     Represents a seed node, the node that receive and attend all client request.
     """
-    def __init__(self, address, port):
+    def __init__(self, address, port, repLimit):
         self.addr = address
         self.port = port
+        self.repLimit = repLimit
         self.seeds = [(address, port)]
+        self.owners = dict()
 
         log.debug(f"Seed node created with address:{address}:{port}", pMainLog)
 
@@ -323,6 +442,8 @@ class Seed:
         verificationQ = Queue()
         failedQ = Queue()
         newSeedsQ = Queue()
+        removeQ = Queue()
+        dataQ = Queue()
 
         tmp = self.seeds.copy()
         tmp.remove((self.addr, self.port))
@@ -332,14 +453,16 @@ class Seed:
         pPush = Process(target=pushTask, name="Task Pusher", args=(pushQ, f"{self.addr}:{self.port + 1}"))
         pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, failedQ, f"{self.addr}:{self.port + 2}"))
         pTaskPublisher = Process(target=taskPublisher, name="Task Publisher", args=(f"{self.addr}:{self.port + 3}", taskToPubQ))
-        pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.addr, self.port, seedsQ, resultQ, newSeedsQ))
+        pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.addr, self.port, seedsQ, resultQ, newSeedsQ, dataQ))
         pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 800, pushQ))
         pListener = Process(target=broadcastListener, name="Broadcast Listener", args=((self.addr, self.port), broadcastPort))
 
         taskManager1T = Thread(target=taskManager, name="Task Manager - PULLED", args=(self.tasks, pulledQ, taskToPubQ, True))
-        taskManager2T = Thread(target=taskManager, name="Task Manager - DONE", args=(self.tasks, resultQ, taskToPubQ, True))
-        taskManager3T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
+        taskManager2T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
         seedManagerT = Thread(target=seedManager, name="Seed Manager", args=(self.seeds, newSeedsQ))
+        resourceManagerT = Thread(target=resourceManager, name="Resource Manager", args=(self.owners, self.tasks, dataQ))
+        conitCreatorT = Thread(target=conitCreator, name="Conit Creator", args=(self.tasks, (self.addr, self.port), resultQ, taskToPubQ))
+        removeOwnerT = Thread(target=removeOwner, name="Remove Owner", args=(self.owners, removeQ))
         purgerT = Thread(target=purger, name="Purger", args=(self.tasks, 3000000))
 
         pPush.start()
@@ -351,8 +474,10 @@ class Seed:
 
         taskManager1T.start()
         taskManager2T.start()
-        taskManager3T.start()
         seedManagerT.start()
+        resourceManagerT.start()
+        conitCreatorT.start()
+        removeOwnerT.start()
         purgerT.start()
 
         time.sleep(0.5)
