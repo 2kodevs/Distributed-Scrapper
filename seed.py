@@ -565,7 +565,7 @@ class Seed:
                 elif msg[0] == "NEW_SEED":
                     log.debug("NEW_SEED received, saving new seed...")
                     #addr = (address, port)
-                    addr = msg[1]
+                    addr = tuple(msg[1])
                     with lockSeeds:
                         self.seeds.append(addr)
                     seedsQ.put(addr)
