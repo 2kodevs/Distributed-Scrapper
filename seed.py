@@ -108,7 +108,7 @@ def getData(url, address, owners, resultQ, removeQ):
 
     random.shuffle(owners)
     for o in owners:
-        sock.connect(f"tcp://{o}")
+        sock.connect(f"tcp://{o[0]}:{o[1]}")
         try:
             log.info(f"Requesting data to seed: {o}", "Get Data")
             sock.send_pyobj(("GET_DATA", url))
@@ -126,7 +126,7 @@ def getData(url, address, owners, resultQ, removeQ):
         except Exception as e:
             log.error(e, "Get Data")
         finally:
-            sock.disconnect(f"tcp://{o}")
+            sock.disconnect(f"tcp://{o[0]}:{o[1]}")
     resultQ.put(False)        
         
 
@@ -165,16 +165,17 @@ def conitCreator(tasks, address, resultQ, toPubQ, request, package):
                     #NEW_DATA: update owners of url's data with address
                     toPubQ.put((flag, url, ("NEW_DATA", address)))
             else:
-                #it comes from dispatch, Replicate data
+                #It comes from dispatch, Replicate data
                 log.debug(f"Replicating data of {url}...", "Conit Creator")
                 tasks[url][1].updateData(data[0], data[1])
                 data = data[0]
                 tasks[url][1].addOwner(address)
                 toPubQ.put((flag, url, ("NEW_DATA", address)))
             with lockClients:
-                for id in request[url]:
-                    log.error(f"adding {url} to {id}", 'Conit Creator')
-                    package[id][url] = data
+                if url in request:
+                    for id in request[url]:
+                        log.debug(f"Adding {url} to {id}", 'Conit Creator')
+                        package[id][url] = data
                     
 
 def removeOwner(tasks, removeQ):
@@ -209,6 +210,8 @@ def resourceManager(owners, tasks, dataQ):
         url, data = task
         with lockTasks:
             try:
+                if not tasks[url][0]:
+                    raise KeyError 
                 if header == "FORCED":
                     if tasks[url][1].data is not None:
                         tasks[url][1].updateData(data[0])
@@ -226,9 +229,9 @@ def resourceManager(owners, tasks, dataQ):
             except KeyError:
                 #//HACK: is possible that u don't have that entry in tasks
                 if header == "FORCED":
-                    tasks[url] = Conit(None, [data[1]])
+                    tasks[url] = (True, Conit(None, [data[1]]))
                 else:
-                    tasks[url] = Conit(None, [data])
+                    tasks[url] = (True, Conit(None, [data]))
 
 
 def taskManager(tasks, q, toPubQ, pub):
@@ -299,7 +302,7 @@ def connectToPublishers(sock, peerQ):
             sock.connect(f"tcp://{addr}:{port + 3}")
 
 
-def taskSubscriber(addr, port, peerQ, taskQ, seedQ, dataQ, purgeQ):
+def taskSubscriber(peerQ, taskQ, seedQ, dataQ, purgeQ):
     """
     Process that subscribe to published tasks
     """
@@ -322,7 +325,7 @@ def taskSubscriber(addr, port, peerQ, taskQ, seedQ, dataQ, purgeQ):
             with lockSubscriber:
                 header, task = sock.recv_multipart()
                 header = header.decode()
-                log.debug(f"Received Subscribed message: {header.decode()}", "Task Subscriber")
+                log.debug(f"Received Subscribed message: {header}", "Task Subscriber")
                 if header == "PULLED_TASK":
                     #task: (flag, url, data)
                     flag, url, data = pickle.loads(task)
@@ -350,7 +353,7 @@ def purger(tasks, address, cycle, toPubQ, purgeQ):
     Thread that purge the downloaded data from tasks map when a time cycle occurs.
     """
     while True:
-        pClock = Process(target=clock, args(cycle, purgeQ))
+        pClock = Process(target=clock, args=(cycle, purgeQ))
         pClock.start()
         pub = purgeQ.get()
         pClock.terminate()
@@ -462,6 +465,7 @@ class Seed:
         if seed is None:
             #//TODO: Change times param in production
             seed, network = discoverPeer(3, log)
+            log.debug(f"Seed founded: {seed}", "login")
             if seed == "":
                 self.tasks = {}
                 log.info("Login finished", "login")
@@ -515,7 +519,7 @@ class Seed:
         pPush = Process(target=pushTask, name="Task Pusher", args=(pushQ, f"{self.addr}:{self.port + 1}"))
         pWorkerAttender = Process(target=workerAttender, name="Worker Attender", args=(pulledQ, resultQ, failedQ, f"{self.addr}:{self.port + 2}"))
         pTaskPublisher = Process(target=taskPublisher, name="Task Publisher", args=(f"{self.addr}:{self.port + 3}", taskToPubQ))
-        pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(self.addr, self.port, seedsQ, resultQ, newSeedsQ, dataQ, purgeQ))
+        pTaskSubscriber = Process(target=taskSubscriber, name="Task Subscriber", args=(seedsQ, failedQ, newSeedsQ, dataQ, purgeQ))
         pVerifier = Process(target=verificator, name="Verificator", args=(verificationQ, 500, pushQ))
         pListener = Process(target=broadcastListener, name="Broadcast Listener", args=((self.addr, self.port), broadcastPort))
 
@@ -600,7 +604,7 @@ class Seed:
                             pushQ.put(url)
                     with lockClients:
                         res = ("RESPONSE", self.package[id])
-                        log.debug(f"Sending package of size {len(res)}")
+                        log.debug(f"Sending package of size {len(res)}", "serve")
                         sock.send_pyobj(res)
                         self.package[id].clear()
                 elif msg[0] == "GET_TASKS":
@@ -634,10 +638,12 @@ class Seed:
                         pass
                     sock.send_pyobj(rep)
                 else:
-                    sock.send(b"UNKNOWN")      
+                    sock.send_pyobj("UNKNOWN")      
             except Exception as e:
                 #Handle connection error
                 log.error(e, "serve")
+                if e == "Operation cannot be accomplished in current state":
+                    sock.send_pyobj("UNKNOWN")
                 time.sleep(5)
             
 

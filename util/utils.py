@@ -111,7 +111,7 @@ def discoverPeer(times, log):
                 if header == 'WELCOME':
                     log.debug(f"Received confirmation: {address}", "discoverPeer")
                     log.info(f"Server: {str(server)}", "discoverPeer")
-                    seed = f"{address[0]}:{address[1]}"
+                    seed = f"{server[0]}:{address[1]}"
                     break
                 else:
                     log.debug("Login failed, retrying...", "discoverPeer")
