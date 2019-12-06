@@ -609,7 +609,6 @@ class Seed:
                                     if data:
                                         #data: (data, lives)
                                         log.debug(f"Hit on {url}. Total hits: {res[1].hits + 1}", "serve")
-                                        res = (True, data[0])
                                         with lockClients:
                                             self.package[id][url] = data[0]
                                         if res[1].hit() and res[1].tryOwn(self.repLimit):
