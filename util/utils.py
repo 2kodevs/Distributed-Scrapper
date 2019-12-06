@@ -242,3 +242,11 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromIn
 
         #//TODO: Change the amount of the sleep in production
         time.sleep(sleepTime)
+
+
+def clock(cycle, q):
+    """
+    Process that notice to the <q> Queue owner when a cycle is passed.
+    """
+    time.sleep(cycle)
+    q.put(True)
