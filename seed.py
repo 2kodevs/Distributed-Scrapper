@@ -97,7 +97,7 @@ def workerAttender(pulledQ, resultQ, failedQ, addr):
             continue
 
 
-def getData(url, address, owners, resultQ, removeQ):
+def getData(url, address, owners, resultQ, removeQ, seedManagerQ):
     """
     Process that make a NOBLOCK request to know owners
     of url's data.
@@ -115,6 +115,7 @@ def getData(url, address, owners, resultQ, removeQ):
             if ans == False:
                 #rare case that 'o' don't have the data
                 removeQ.put((o, url))
+                seedManagerQ.put(("REMOVE", o))
                 continue
             #ans: (data, lives)
             resultQ.put(ans)
@@ -122,6 +123,7 @@ def getData(url, address, owners, resultQ, removeQ):
         except zmq.error.Again as e:
             log.debug(e, "Get Data")
             removeQ.put((o, url))
+            seedManagerQ.put(("REMOVE", o))
         except Exception as e:
             log.error(e, "Get Data")
         finally:
@@ -242,8 +244,10 @@ def seedManager(seeds, q):
         with lockSeeds:
             if cmd == "APPEND" and address not in seeds:
                 seeds.append(address)
+                log.info(f"Appended seed", "Seed Manager")
             elif cmd == "REMOVE" and address in seeds:
                 seeds.remove(address)
+                log.info(f"Removed seed", "Seed Manager")
 
 
 def taskPublisher(addr, taskQ):
@@ -341,7 +345,7 @@ def taskSubscriber(peerQ, disconnectQ, taskQ, seedQ, dataQ, purgeQ):
                     #task: (address, port)
                     addr, port = pickle.loads(task)
                     seedQ.put(("REMOVE", (addr, port)))
-                    disconnectQ.put((addr, port))
+                    #disconnectQ.put((addr, port))
                 elif header == "PURGE":
                     purgeQ.put(False)
                 else:
@@ -482,8 +486,8 @@ class Seed:
         pGetSeeds.start()
         tmp = seedsQ.get()
         #If Get Seeds fails to connect to a seed for some reason
-        if tmp is not None and tmp not in self.seeds:
-            self.seeds.extend(tmp)
+        if tmp is not None:
+            self.seeds.extend([s for s in tmp if s not in self.seeds])
         pGetSeeds.terminate()
 
         tasksQ = Queue()
@@ -588,7 +592,7 @@ class Seed:
                                 if res[1].data == None:
                                     #i don't have a local replica, ask owners
                                     getDataQ = Queue()                      
-                                    pGetData = Process(target=getData, name="Get Data", args=(url, (self.addr, self.port), res[1].owners, getDataQ, removeQ))
+                                    pGetData = Process(target=getData, name="Get Data", args=(url, (self.addr, self.port), res[1].owners, getDataQ, removeQ, newSeedsQ))
                                     pGetData.start()
                                     data = getDataQ.get()
                                     pGetData.terminate()
