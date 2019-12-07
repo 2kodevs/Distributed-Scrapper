@@ -20,7 +20,9 @@ def getIpOffline():
 
 
 def makeUuid(n, urls):
-    #//TODO: Describe this function
+    """
+    Returns a number that can be used as an unique universal identifier.
+    """
     name = ""
     random.shuffle(urls)
     for url in urls:
@@ -109,20 +111,21 @@ def discoverPeer(times, log):
                 data, server = sock.recvfrom(4096)
                 header, address = pickle.loads(data)
                 if header == 'WELCOME':
-                    log.debug(f"Received confirmation: {address}", "discoverPeer")
+                    log.info(f"Received confirmation: {address}", "discoverPeer")
                     log.info(f"Server: {str(server)}", "discoverPeer")
-                    seed = f"{address[0]}:{address[1]}"
-                    break
+                    seed = f"{server[0]}:{address[1]}"
+                    sock.close()
+                    return seed, network
                 else:
-                    log.debug("Login failed, retrying...", "discoverPeer")
+                    log.info("Login failed, retrying...", "discoverPeer")
             except timeout as e:
                 log.error("Socket " + str(e), "discoverPeer")
             except Exception as e:
                 log.error(e, "discoverPeer")
-                log.error(f"Connect to a network please, retrying connection in {(i + 1) * 1} seconds...", "discoverPeer")
+                log.error(f"Connect to a network please, retrying connection in {(i + 1) * 2} seconds...", "discoverPeer")
                 network = False
-                #//TODO: Change factor in production
-                time.sleep((i + 1) * 1)
+                #Factor can be changed
+                time.sleep((i + 1) * 2)
 
         sock.close()
         
@@ -149,12 +152,11 @@ def getSeeds(seed, discoverPeer, address, login, q, log):
     sock = noBlockREQ(context, timeout=1200)
     sock.connect(f"tcp://{seed}")
 
-    #//TODO: Test this very carefully
     for i in range(4, 0, -1):
         try:
             sock.send_json(("GET_SEEDS",))
             seeds = sock.recv_pyobj()
-            log.debug(f"Received seeds: {seeds}", "Get Seeds")
+            log.info(f"Received seeds: {seeds}", "Get Seeds")
             if login:
                 sock.send_json(("NEW_SEED", address))
                 sock.recv_json()
@@ -186,7 +188,7 @@ def ping(seed, q, time, log):
     try:
         socket.send_json(("PING",))
         msg = socket.recv_json()
-        log.debug(f"Received {msg} from {seed[0]}:{seed[1]} after ping", "Ping")
+        log.info(f"Received {msg} from {seed[0]}:{seed[1]} after ping", "Ping")
     except zmq.error.Again as e:
         log.debug(f"PING failed -- {e}", "Ping")
         status = False
@@ -240,7 +242,7 @@ def findSeeds(seeds, peerQs, deadQs, log, timeout=1000, sleepTime=15, seedFromIn
                 except queue.Empty:
                     pass
 
-        #//TODO: Change the amount of the sleep in production
+        #The amount of the sleep in production can be changed 
         time.sleep(sleepTime)
         
         

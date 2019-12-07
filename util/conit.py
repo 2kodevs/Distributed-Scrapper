@@ -60,4 +60,4 @@ class Conit:
 
 
     def isRemovable(self):
-        return self.hits < self.limit and self.lives
+        return (self.lives and self.hits < self.limit) or self.lives > 1
