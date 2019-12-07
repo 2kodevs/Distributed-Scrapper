@@ -143,7 +143,7 @@ class Scrapper:
     def __init__(self, address, port):
         self.addr = address
         self.port = port
-        sel.curTask = []
+        self.curTask = []
         
         log.debug(f"Scrapper created", "init")
 
