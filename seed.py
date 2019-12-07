@@ -109,7 +109,7 @@ def getData(url, address, owners, resultQ, removeQ, seedManagerQ):
     for o in owners:
         sock.connect(f"tcp://{o[0]}:{o[1]}")
         try:
-            log.info(f"Requesting data to seed: {o}", "Get Data")
+            log.debug(f"Requesting data to seed: {o}", "Get Data")
             sock.send_json(("GET_DATA", url))
             ans = sock.recv_pyobj()
             if ans == False:
@@ -131,7 +131,7 @@ def getData(url, address, owners, resultQ, removeQ, seedManagerQ):
     resultQ.put(False)        
         
 
-def conitCreator(tasks, address, resultQ, toPubQ, request, package):
+def conitCreator(tasks, address, resultQ, toPubQ, request, package, delT):
     """
     Thread that manage conit creation.
     """
@@ -160,8 +160,7 @@ def conitCreator(tasks, address, resultQ, toPubQ, request, package):
                 else:
                     #it seems that nobody have it. Save data
                     log.debug(f"Saving data with url: {url}", "Conit Creator")
-                    #//TODO: Parameterize param limit of Conit constructor
-                    cnit = Conit(data, owners=[address])
+                    cnit = Conit(data, owners=[address], limit=delT)
                     tasks[url] = (True, cnit)
                     #NEW_DATA: update owners of url's data with address
                     toPubQ.put((flag, url, ("NEW_DATA", address)))
@@ -321,8 +320,8 @@ def taskSubscriber(peerQ, disconnectQ, taskQ, seedQ, dataQ, purgeQ):
     connectT = Thread(target=connectToPublishers, name="Connect to Publishers", args=(sock, peerQ))
     connectT.start()
 
-    disconnectT = Thread(target=disconnectFromPublishers, name="Disconnect from Publishers", args=(sock, disconnectQ))
-    disconnectT.start()
+    # disconnectT = Thread(target=disconnectFromPublishers, name="Disconnect from Publishers", args=(sock, disconnectQ))
+    # disconnectT.start()
 
     time.sleep(1)
 
@@ -331,7 +330,7 @@ def taskSubscriber(peerQ, disconnectQ, taskQ, seedQ, dataQ, purgeQ):
             with lockSubscriber:
                 header, task = sock.recv_multipart()
                 header = header.decode()
-                log.debug(f"Received Subscribed message: {header}", "Task Subscriber")
+                log.info(f"Received Subscribed message: {header}", "Task Subscriber")
                 if header == "PULLED_TASK":
                     #task: (flag, url, data)
                     flag, url, data = pickle.loads(task)
@@ -367,7 +366,7 @@ def purger(tasks, address, cycle, toPubQ, purgeQ, old_requests):
         pub = purgeQ.get()
         pClock.terminate()
         with lockTasks:
-            log.debug("Starting purge", "Purger")
+            log.info("Starting purge", "Purger")
             with lockClients:
                 old_requests.clear()
             for url, value in tasks.items():
@@ -377,7 +376,7 @@ def purger(tasks, address, cycle, toPubQ, purgeQ, old_requests):
                         value[1].removeOwner(address)
                     value[1].addLive()
         log.debug(f"Tasks after purge: {tasks}", "Purger")
-        log.debug("Purge finished", "Purger")
+        log.info("Purge finished", "Purger")
         if pub:
             toPubQ.put(("PURGE",))
 
@@ -395,7 +394,7 @@ def getRemoteTasks(seed, tasksQ):
         try:
             sock.send_json(("GET_TASKS",))
             response = sock.recv_pyobj()
-            log.debug(f"Tasks received", "Get Remote Tasks")
+            log.info(f"Tasks received", "Get Remote Tasks")
             assert isinstance(response, dict), f"Bad response, expected dict received {type(response)}"
             tasksQ.put(response)
             break
@@ -456,7 +455,7 @@ class Seed:
         self.package = dict()
         self.request = dict()
 
-        log.debug(f"Seed node created with address:{address}:{port}", "main")
+        log.info(f"Seed node created with address:{address}:{port}", "main")
 
 
     def login(self, seed):
@@ -476,7 +475,7 @@ class Seed:
         if seed is None:
             #//TODO: Change times param in production
             seed, network = discoverPeer(3, log)
-            log.debug(f"Seed founded: {seed}", "login")
+            log.info(f"Seed founded: {seed}", "login")
             if seed == "":
                 self.tasks = {}
                 log.info("Login finished", "login")
@@ -543,7 +542,7 @@ class Seed:
         taskManager2T = Thread(target=taskManager, name="Task Manager - FAILED", args=(self.tasks, failedQ, taskToPubQ, False))
         seedManagerT = Thread(target=seedManager, name="Seed Manager", args=(self.seeds, newSeedsQ))
         resourceManagerT = Thread(target=resourceManager, name="Resource Manager", args=(self.tasks, dataQ))
-        conitCreatorT = Thread(target=conitCreator, name="Conit Creator", args=(self.tasks, (self.addr, self.port), resultQ, taskToPubQ, self.request, self.package))
+        conitCreatorT = Thread(target=conitCreator, name="Conit Creator", args=(self.tasks, (self.addr, self.port), resultQ, taskToPubQ, self.request, self.package, self.delT))
         removeOwnerT = Thread(target=removeOwner, name="Remove Owner", args=(self.tasks, removeQ, taskToPubQ))
         purgerT = Thread(target=purger, name="Purger", args=(self.tasks, (self.addr, self.port), 600, taskToPubQ, purgeQ, self.request)) #10 minutes
 
@@ -581,7 +580,6 @@ class Seed:
                             res = self.tasks[url]
                             if not res[0]:
                                 if isinstance(res[1], tuple):
-                                    #log.debug(f"Verificating {url} in the system...", "serve")
                                     verificationQ.put((res[1], url))
                                 elif url == res[1]:
                                     raise KeyError
@@ -624,10 +622,10 @@ class Seed:
                         self.package[id].clear()
                 elif msg[0] == "GET_TASKS":
                     with lockTasks:
-                        log.debug("GET_TASK received, sending tasks", "serve")
+                        log.info("GET_TASK received, sending tasks", "serve")
                         sock.send_pyobj(cloneTasks(self.tasks))
                 elif msg[0] == "NEW_SEED":
-                    log.debug("NEW_SEED received, saving new seed...")
+                    log.info("NEW_SEED received, saving new seed...")
                     #addr = (address, port)
                     addr = tuple(msg[1])
                     with lockSeeds:
@@ -637,15 +635,15 @@ class Seed:
                             taskToPubQ.put(addr)
                     sock.send_json("OK")
                 elif msg[0] == "GET_SEEDS":
-                    log.debug("GET_SEEDS received, sending seeds", "serve")
+                    log.info("GET_SEEDS received, sending seeds", "serve")
                     with lockSeeds:
                         log.debug(f"Seeds: {self.seeds}", "serve")
                         sock.send_pyobj(self.seeds)
                 elif msg[0] == "PING":
-                    log.debug("PING received", "serve")
+                    log.info("PING received", "serve")
                     sock.send_json("OK")
                 elif msg[0] == "GET_DATA":
-                    log.debug("GET_DATA received", "serve")
+                    log.info("GET_DATA received", "serve")
                     try:
                         rep = False
                         if self.tasks[msg[1]][0] and self.tasks[msg[1]][1].data is not None:

@@ -1,8 +1,8 @@
 import zmq, time, os, json, re
 from bs4 import BeautifulSoup
-from util.colors import GREEN, RESET
+from util.colors import GREEN, RED, RESET
 from scrapy.http import HtmlResponse
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from multiprocessing import Process, Queue
 from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds, findSeeds, valid_tags, change_html
 from threading import Thread, Lock as tLock, Semaphore
@@ -104,7 +104,7 @@ class Dispatcher:
         self.address = address
         self.port = port
 
-        log.debug(f"Dispatcher created with uuid {uuid}", "Init")
+        log.info(f"Dispatcher created with uuid {uuid}", "Init")
         
 
     def login(self, seed):
@@ -183,13 +183,13 @@ class Dispatcher:
                     self.urls.append(url)
                     with counterSocketReq:
                         socket.send_json(("URL", self.uuid, url))
-                        log.debug(f"send {url}", "dispatch")
+                        log.debug(f"Send {url}", "dispatch")
                         response = socket.recv_pyobj()
                     assert isinstance(response, tuple), f"Bad response, expected <tuple> find {type(response)}"
                     assert len(response) == 2, "bad response size"
                     assert response[0] == 'RESPONSE', "Unexpected response format"
                     _, package = response
-                    log.info(f"Received a package with size: {len(package)}", "dispatch")
+                    log.debug(f"Received a package with size: {len(package)}", "dispatch")
                     for recv_url, html in package.items():
                         try:
                             idx = self.urls.index(recv_url)
@@ -204,8 +204,6 @@ class Dispatcher:
                     log.debug(e, "dispatch")
                 except Exception as e:
                     log.error(e, "dispatch")
-                    # That line is currently necessary?
-                    # seeds.append(seeds.pop(0))  
                 time.sleep(0.8)
                  
             log.info(f'Depth {depth} done', 'dispatch')
@@ -230,7 +228,7 @@ class Dispatcher:
                     html = change_html(text, changes).encode()
                 except UnicodeDecodeError:
                     log.debug(f'{url} is not decodeable', 'dispatch')
-                except: # BeautifulSoup strange exceptions related with it's logger
+                except: # BeautifulSoup strange exceptions related with his's logger
                     pass
                 new_data[url] = html
             data.update(new_data)
@@ -246,7 +244,7 @@ class Dispatcher:
                 self.old.update(src)
                 self.urls = list(src)
             depth += 1
-            log.info(f"Number of URLs to be requested for download: {len(self.urls)}", "dispatch")
+            log.info(f"Number of URLs to be requested for download: {RED}{len(self.urls)}{RESET}", "dispatch")
             
         log.info(f"Starting to write data", "dispatch")
         for i, url in enumerate(self.originals):
@@ -326,8 +324,6 @@ if __name__ == "__main__":
     parser.add_argument('-u', '--urls', type=str, default='urls', help='path of file that contains the urls set')
     parser.add_argument('-s', '--seed', type=str, default=None, help='address of an existing seed node. Insert as ip_address:port_number')
 
-
-    #//TODO: use another arg to set the path to a file that contains the set of urls
 
     args = parser.parse_args()
 

@@ -1,8 +1,7 @@
 import zmq, logging, time, os, requests, pickle, re
-from util.params import seeds, localhost
 from multiprocessing import Process, Lock, Queue, Value
 from ctypes import c_int
-from threading import Thread, Lock as tLock,Semaphore
+from threading import Thread, Lock as tLock, Semaphore
 from util.utils import parseLevel, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds, findSeeds
 
 
@@ -27,7 +26,6 @@ def slave(tasks, notifications, idx, verifyQ):
         with availableSlaves:
             availableSlaves.value -= 1
         log.info(f"Child:{os.getpid()} of Scrapper downloading {url}", f"slave {idx}")
-        #//TODO: Handle better a request connection error, we retry it a few times?
         for i in range(5):
             try:
                 response = requests.get(url)
@@ -113,7 +111,7 @@ def notifier(notifications, peerQ, deadQ):
         try:
             assert len(msg) == 3, "wrong notification"
         except AssertionError as e:
-            log.error(e)
+            log.error(e, "Worker Notifier")
             continue
         while True:
             try:
@@ -145,7 +143,7 @@ class Scrapper:
         self.port = port
         self.curTask = []
         
-        log.debug(f"Scrapper created", "init")
+        log.info(f"Scrapper created", "init")
 
 
     def login(self, seed):
@@ -217,7 +215,7 @@ class Scrapper:
         listenT.start()
         
         taskQ = Queue()
-        log.info(f"Scrapper starting child process", "manage")
+        log.info(f"Scrapper starting child processes", "manage")
         availableSlaves.value = slaves
         for i in range(slaves):
             p = Process(target=slave, args=(taskQ, notificationsQ, i, pendingQ))
@@ -245,7 +243,6 @@ class Scrapper:
                 log.debug(f"No new messages to pull: {e}", "manage")
             time.sleep(1)
             
-        pListen.terminate()
         pNotifier.terminate()               
 
 
