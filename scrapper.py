@@ -10,6 +10,7 @@ log = Logger(name="Scrapper")
 
 availableSlaves = Value(c_int)
 
+lockWork = tLock()
 lockClients = tLock()
 lockSocketPull = tLock()
 lockSocketNotifier = tLock()
@@ -42,24 +43,22 @@ def slave(tasks, notifications, idx, verifyQ):
             availableSlaves.value += 1
     
 
-def listener(addr, port, queue):
+def listener(addr, port, queue, data):
     """
     Process to attend the verification messages sent by the seed.
     """
     
-    lock = tLock()
-    def puller(q, l):
-        for flag, url in iter(q.get, "STOP"):
-            with lock:
+    def puller():
+        for flag, url in iter(queue.get, "STOP"):
+            with lockWork:
                 try:
                     if flag:
-                        l.append(url)
+                        data.append(url)
                     else:
-                        l.remove(url)
+                        data.remove(url)
                 except Exception as e:
                     log.error(e, "puller")
                     
-    data = []
     thread = Thread(target=puller, args=(queue, data))
     thread.start()
     socket = zmq.Context().socket(zmq.REP)
@@ -67,7 +66,7 @@ def listener(addr, port, queue):
     
     while True:
         res = socket.recv().decode()
-        with lock:
+        with lockWork:
             socket.send_json(res in data)
     
 
@@ -144,6 +143,7 @@ class Scrapper:
     def __init__(self, address, port):
         self.addr = address
         self.port = port
+        sel.curTask = []
         
         log.debug(f"Scrapper created", "init")
 
@@ -213,7 +213,7 @@ class Scrapper:
         pNotifier = Process(target=notifier, name="pNotifier", args=(notificationsQ, seedsQ2, toDisconnectQ2))
         pNotifier.start()
         
-        listenT = Process(target=listener, name="pListen", args=(self.addr, self.port, pendingQ))
+        listenT = Process(target=listener, name="pListen", args=(self.addr, self.port, pendingQ, self.curTask))
         listenT.start()
         
         taskQ = Queue()
@@ -235,10 +235,12 @@ class Scrapper:
                         with counterSocketPull:
                             with lockSocketPull:
                                 url = socketPull.recv(flags=zmq.NOBLOCK).decode()
-                        taskQ.put(url)
-                        notificationsQ.put(("PULLED", url, addr))
-                        pendingQ.put((True, url))
-                        log.debug(f"Pulled {url} in scrapper", "manage")
+                        with lockWork:
+                            if url not in self.curTask:
+                                taskQ.put(url)
+                                notificationsQ.put(("PULLED", url, addr))
+                                pendingQ.put((True, url))
+                                log.debug(f"Pulled {url} in scrapper", "manage")
             except zmq.error.ZMQError as e:
                 log.debug(f"No new messages to pull: {e}", "manage")
             time.sleep(1)
