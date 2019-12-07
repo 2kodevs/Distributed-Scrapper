@@ -59,7 +59,7 @@ def listener(addr, port, queue, data):
                 except Exception as e:
                     log.error(e, "puller")
                     
-    thread = Thread(target=puller, args=(queue, data))
+    thread = Thread(target=puller)
     thread.start()
     socket = zmq.Context().socket(zmq.REP)
     socket.bind(f"tcp://{addr}:{port}")
