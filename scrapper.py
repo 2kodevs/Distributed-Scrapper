@@ -51,10 +51,13 @@ def listener(addr, port, queue):
     def puller(q, l):
         for flag, url in iter(q.get, "STOP"):
             with lock:
-                if flag:
-                    l.append(url)
-                else:
-                    l.remove(url)
+                try:
+                    if flag:
+                        l.append(url)
+                    else:
+                        l.remove(url)
+                except Exception as e:
+                    log.error(e, "puller")
                     
     data = []
     thread = Thread(target=puller, args=(queue, data))

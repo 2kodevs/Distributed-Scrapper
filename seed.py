@@ -645,7 +645,7 @@ class Seed:
                             rep = (self.tasks[msg[1]][1].data, self.tasks[msg[1]][1].lives) 
                     except KeyError:
                         pass
-                    log.debug("Sending response to GET_DATA")
+                    log.debug("Sending response to GET_DATA", "serve")
                     sock.send_pyobj(rep)
                 else:
                     sock.send_pyobj("UNKNOWN")      
