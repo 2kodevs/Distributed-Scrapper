@@ -447,10 +447,11 @@ class Seed:
     """
     Represents a seed node, the node that receive and attend all client request.
     """
-    def __init__(self, address, port, repLimit):
+    def __init__(self, address, port, repLimit, delT):
         self.addr = address
         self.port = port
         self.repLimit = repLimit
+        self.delT = delT
         self.seeds = [(address, port)]
         self.package = dict()
         self.request = dict()
@@ -544,7 +545,7 @@ class Seed:
         resourceManagerT = Thread(target=resourceManager, name="Resource Manager", args=(self.tasks, dataQ))
         conitCreatorT = Thread(target=conitCreator, name="Conit Creator", args=(self.tasks, (self.addr, self.port), resultQ, taskToPubQ, self.request, self.package))
         removeOwnerT = Thread(target=removeOwner, name="Remove Owner", args=(self.tasks, removeQ, taskToPubQ))
-        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, (self.addr, self.port), 1200, taskToPubQ, purgeQ, self.request)) #20 minutes
+        purgerT = Thread(target=purger, name="Purger", args=(self.tasks, (self.addr, self.port), 600, taskToPubQ, purgeQ, self.request)) #10 minutes
 
         pPush.start()
         pWorkerAttender.start()
@@ -663,7 +664,7 @@ class Seed:
 
 def main(args):
     log.setLevel(parseLevel(args.level))
-    s = Seed(args.address, args.port, args.replication_limit)
+    s = Seed(args.address, args.port, args.replication_limit, args.deletion_threshold)
     if not s.login(args.seed):
         log.info("You are not connected to a network", "main") 
     s.serve(args.broadcast_port)
@@ -679,6 +680,7 @@ if __name__ == "__main__":
     parser.add_argument('-l', '--level', type=str, default='DEBUG', help='log level')
     parser.add_argument('-s', '--seed', type=str, default=None, help='address of a existing seed node. Insert as ip_address:port_number')
     parser.add_argument('-r', '--replication_limit', type=int, default=2, help='maximum number of times that you want data to be replicated')
+    parser.add_argument('-d', '--deletion_threshold', type=int, default=5, help='deletion threshold for data in cache')
 
     args = parser.parse_args()
 
