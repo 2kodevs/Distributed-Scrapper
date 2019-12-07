@@ -565,13 +565,13 @@ class Seed:
                 msg = sock.recv_json()
                 if msg[0] == "URL":
                     _, id, url = msg
-                    with lockClients:
-                        if url not in self.request:
-                            self.request[url] = set()
-                        self.request[url].add(id)
-                        if id not in self.package:
-                            self.package[id] = dict()
                     with lockTasks:
+                        with lockClients:
+                            if url not in self.request:
+                                self.request[url] = set()
+                            self.request[url].add(id)
+                            if id not in self.package:
+                                self.package[id] = dict()
                         try:
                             res = self.tasks[url]
                             if not res[0]:
