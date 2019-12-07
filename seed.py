@@ -482,7 +482,7 @@ class Seed:
         pGetSeeds.start()
         tmp = seedsQ.get()
         #If Get Seeds fails to connect to a seed for some reason
-        if tmp is not None:
+        if tmp is not None and tmp not in self.seeds:
             self.seeds.extend(tmp)
         pGetSeeds.terminate()
 
