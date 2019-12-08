@@ -1,8 +1,8 @@
 import zmq, time, os, json, re
 from bs4 import BeautifulSoup
-from util.colors import GREEN, RESET
+from util.colors import GREEN, RED, RESET
 from scrapy.http import HtmlResponse
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from multiprocessing import Process, Queue
 from util.utils import parseLevel, makeUuid, LoggerFactory as Logger, noBlockREQ, discoverPeer, getSeeds, findSeeds, valid_tags, change_html
 from threading import Thread, Lock as tLock, Semaphore
@@ -104,7 +104,7 @@ class Dispatcher:
         self.address = address
         self.port = port
 
-        log.debug(f"Dispatcher created with uuid {uuid}", "Init")
+        log.info(f"Dispatcher created with uuid {uuid}", "Init")
         
 
     def login(self, seed):
@@ -179,27 +179,32 @@ class Dispatcher:
             while len(self.urls):
                 try:
                     url = self.urls[0]
-                    with counterSocketReq:
-                        socket.send_json(("URL", url))
-                        log.debug(f"send {url}", "dispatch")
-                        response = socket.recv_pyobj()
-                    assert len(response) == 2, "bad response size"
-                    download, html = response
-                    log.debug(f"Received {download}", "dispatch")
                     self.urls.pop(0)
-                    if download:
-                        log.info(f"{url} {GREEN}OK{RESET}", "dispatch")
-                        new_data[url] = html
-                    else:
-                        self.urls.append(url)
+                    self.urls.append(url)
+                    with counterSocketReq:
+                        socket.send_json(("URL", self.uuid, url))
+                        log.debug(f"Send {url}", "dispatch")
+                        response = socket.recv_pyobj()
+                    assert isinstance(response, tuple), f"Bad response, expected <tuple> find {type(response)}"
+                    assert len(response) == 2, "bad response size"
+                    assert response[0] == 'RESPONSE', "Unexpected response format"
+                    _, package = response
+                    log.debug(f"Received a package with size: {len(package)}", "dispatch")
+                    for recv_url, html in package.items():
+                        try:
+                            idx = self.urls.index(recv_url)
+                            log.info(f"{recv_url} {GREEN}OK{RESET}", "dispatch")
+                            new_data[recv_url] = html
+                            self.urls.pop(idx)
+                        except ValueError:
+                            log.debug(f'Unnecesary {recv_url}', 'dispatch')
                 except AssertionError as e:
                     log.error(e, "dispatch")
                 except zmq.error.Again as e:
                     log.debug(e, "dispatch")
                 except Exception as e:
                     log.error(e, "dispatch")
-                    seeds.append(seeds.pop(0))  
-                time.sleep(1)
+                time.sleep(0.8)
                  
             log.info(f'Depth {depth} done', 'dispatch')
             for url, html in new_data.items():
@@ -223,7 +228,7 @@ class Dispatcher:
                     html = change_html(text, changes).encode()
                 except UnicodeDecodeError:
                     log.debug(f'{url} is not decodeable', 'dispatch')
-                except: # BeautifulSoup strange exceptions related with it's logger
+                except: # BeautifulSoup strange exceptions related with his's logger
                     pass
                 new_data[url] = html
             data.update(new_data)
@@ -239,7 +244,7 @@ class Dispatcher:
                 self.old.update(src)
                 self.urls = list(src)
             depth += 1
-            log.info(f"Number of URLs to be requested for download: {len(self.urls)}", "dispatch")
+            log.info(f"Number of URLs to be requested for download: {RED}{len(self.urls)}{RESET}", "dispatch")
             
         log.info(f"Starting to write data", "dispatch")
         for i, url in enumerate(self.originals):
@@ -269,9 +274,9 @@ class Dispatcher:
         log.debug(f"Dispatcher:{self.uuid} disconnecting from system", "dispatch")
         #disconnect
 
-        pWriter.join()
         queue.put(True)
         pFindSeeds.terminate()
+        pInput.terminate()
         
         
 def main(args):
@@ -319,8 +324,6 @@ if __name__ == "__main__":
     parser.add_argument('-u', '--urls', type=str, default='urls', help='path of file that contains the urls set')
     parser.add_argument('-s', '--seed', type=str, default=None, help='address of an existing seed node. Insert as ip_address:port_number')
 
-
-    #//TODO: use another arg to set the path to a file that contains the set of urls
 
     args = parser.parse_args()
 
