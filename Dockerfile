@@ -1,8 +1,8 @@
-# using image in `python-image`
+# Using image in `python-image`
 FROM 2kodevs:scrapper-deps
 
-# adding project files
-ADD . /app/
+# Adding project files
+ADD ./ /home/Distributed-Scrapper
 
-# moving inside the project folder
-WORKDIR /app
+# Moving inside the project folder
+WORKDIR /home/Distributed-Scrapper
