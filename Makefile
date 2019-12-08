@@ -12,7 +12,7 @@ python-image: ## Generate a docker image with all python dependencies
 	docker build python-image/ -t 2kodevs:scrapper-deps
 
 project-image: ## Generate a docker image with the project files
-	docker build python-image/ -t 2kodevs:scrapper-deps
+	docker build python-image/ -t 2kodevs:scrapper
 
 dispatcher: ## Run a dispatcher with default params in <target>
 	$(run) python dispatcher.py
