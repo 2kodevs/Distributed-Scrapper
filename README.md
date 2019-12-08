@@ -62,6 +62,8 @@ Another way is to run from the project's root:
 
 `make run target=docker node="<node_name.py> <args>"`
 
+`target=<target>` is for specify if a node it is wanted to be run using docker, skip it to not use docker.
+
 ### Note
 
 The set of URLs to be downloaded must be of the form (it does not need a special extension):
@@ -77,7 +79,7 @@ The set of URLs to be downloaded must be of the form (it does not need a special
 
 ## Authors ✒️
 
-- **Miguel Tenorio Potrony** ------> [stdevAntiD2ta](https://github.com/stdevAntiD2ta)
+- **Miguel Tenorio Potrony** -------> [stdevAntiD2ta](https://github.com/stdevAntiD2ta)
 - **Lázaro Raúl Iglesias Vera** ----> [stdevRulo](https://github.com/stdevRulo)
 
 ## License 📄
