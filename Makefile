@@ -1,20 +1,30 @@
 
+bash =  
+docker = docker run -it --rm 2kodevs:scrapper
+target = bash
+run = $($(target))
 folder = local_data
 
 edit: ## Open the Makefile in editor
 	code Makefile
 
-dispatcher: ## Run a dispatcher with default params
-	python dispatcher.py
+python-image: ## Generate a docker image with all python dependencies
+	docker build python-image/ -t 2kodevs:scrapper-deps
 
-dispatcher-remote: ## Run a dispatcher with default params and with seed address atached
-	python dispatcher.py -s 127.0.0.1:8101
+project-image: ## Generate a docker image with the project files
+	docker build python-image/ -t 2kodevs:scrapper-deps
 
-seed: ## Run a scrapper with default params and seeder flag on
-	python seed.py
+dispatcher: ## Run a dispatcher with default params in <target>
+	$(run) python dispatcher.py
 
-worker: ## Run a scrapper with default params
-	python scrapper.py
+dispatcher-remote: ## Run a dispatcher with default params and with seed address atached in <target>
+	$(run) python dispatcher.py -s 127.0.0.1:8101
+
+seed: ## Run a scrapper with default params and seeder flag on in <target>
+	$(run) python seed.py
+
+worker: ## Run a scrapper with default params in <target>
+	$(run) python scrapper.py
 
 clean: ## Open the Makefile in editor
 	rm downloads/*
