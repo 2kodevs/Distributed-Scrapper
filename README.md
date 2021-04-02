@@ -79,7 +79,7 @@ The set of URLs to be downloaded must be of the form (it does not need a special
 
 ## Authors ✒️
 
-- **Miguel Tenorio Potrony** -------> [stdevAntiD2ta](https://github.com/stdevAntiD2ta)
+- **Miguel Tenorio Potrony** -------> [AntiD2ta](https://github.com/AntiD2ta)
 - **Lázaro Raúl Iglesias Vera** ----> [stdevRulo](https://github.com/stdevRulo)
 
 ## License 📄
